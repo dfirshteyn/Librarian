@@ -86,16 +86,26 @@ defmodule Librarian.WarmStore do
   end
 
   @doc """
-  Recall memories matching the query. Candidates are found by keyword
-  substring match (fast, no model needed), then re-ranked by a combined
-  score of cosine similarity (when embeddings exist) and importance.
+  Recall memories matching the query using 3-way Reciprocal Rank Fusion (RRF).
 
-  Falls back to importance-only ranking when a memory has no embedding
-  (e.g. from QwenApi, which returns nil for embed/1). This means the
-  ranking degrades gracefully rather than breaking when backends are mixed.
+  Three independent ranked lists are generated:
+    1. **Keyword score** — term frequency of query tokens in summary, facts, and tags
+    2. **Vector score** — cosine similarity between query embedding and memory embedding
+    3. **Importance score** — the memory's curated importance (with Ebbinghaus decay)
+
+  These three lists are fused via RRF: `score = Σ 1/(k + rank)` for each list where
+  the memory has a non-zero signal. The constant k=60 softens the ranking so a
+  memory that's #1 in one signal and #50 in another still gets a meaningful
+  combined score.
+
+  This replaces the old hard keyword filter + weighted sum approach. The key
+  improvement: memories that are semantically relevant (high vector score) but
+  don't share query keywords are no longer excluded — they're ranked low but
+  still findable. Meanwhile, importance ensures that critical, frequently-recalled
+  memories surface even when keyword and vector signals are weak.
   """
   def recall(query, user_id \\ "local", opts \\ []) when is_binary(query) do
-    q = String.downcase(query)
+    query_tokens = String.downcase(query) |> String.split() |> Enum.reject(&(&1 == ""))
     include_superseded = Keyword.get(opts, :include_superseded, false)
     prefix = user_id <> ":"
 
@@ -105,30 +115,84 @@ defmodule Librarian.WarmStore do
         _ -> nil
       end
 
-    all()
-    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
-    |> Enum.filter(fn m -> include_superseded or is_nil(m.superseded_by) end)
-    |> Enum.filter(fn m ->
-      String.contains?(String.downcase(m.summary || ""), q) or
-        Enum.any?(m.facts || [], &String.contains?(String.downcase(&1), q)) or
-        Enum.any?(m.tags || [], &String.contains?(&1, q))
+    # 1. Gather all viable memory candidates (no hard keyword filter)
+    candidates =
+      all()
+      |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+      |> Enum.filter(fn m -> include_superseded or is_nil(m.superseded_by) end)
+
+    # 2. Extract the three baseline metrics for each candidate
+    scored =
+      candidates
+      |> Enum.map(fn m ->
+        ks = keyword_score(m, query_tokens)
+        vs = cosine_similarity_or_nil(m.embedding, query_embedding)
+        imp = m.importance || 0.0
+        {m, ks, vs, imp}
+      end)
+
+    # 3. Rank each category independently (descending)
+    keyword_ranked = scored |> Enum.sort_by(fn {_m, ks, _vs, _imp} -> -ks end) |> Enum.with_index(1)
+    vector_ranked  = scored |> Enum.sort_by(fn {_m, _ks, vs, _imp} -> -(vs || 0.0) end) |> Enum.with_index(1)
+    import_ranked  = scored |> Enum.sort_by(fn {_m, _ks, _vs, imp} -> -imp end) |> Enum.with_index(1)
+
+    # 4. Build instant rank lookups by memory id
+    keyword_ranks = Map.new(keyword_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
+    vector_ranks  = Map.new(vector_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
+    import_ranks  = Map.new(import_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
+
+    # 5. Execute 3-way RRF fusion
+    k = 60
+    scored
+    |> Enum.map(fn {m, ks, vs, _imp} ->
+      kr = Map.get(keyword_ranks, m.id)
+      vr = Map.get(vector_ranks, m.id)
+      ir = Map.get(import_ranks, m.id)
+
+      # If score is zero or nil, it contributes 0.0 to mimic omission from top-N
+      rrf = if ks > 0, do: 1.0 / (k + kr), else: 0.0
+      rrf = rrf + if not is_nil(vs), do: 1.0 / (k + vr), else: 0.0
+      rrf = rrf + 1.0 / (k + ir)
+
+      {m, rrf}
     end)
-    |> Enum.sort_by(fn m -> -recall_score(m, query_embedding) end)
+    |> Enum.sort_by(fn {_m, rrf} -> -rrf end)
+    |> Enum.map(fn {m, _} -> m end)
   end
 
-  # Combined score: 60% cosine similarity (when available) + 40% importance.
-  # The split is intentional — importance encodes how decision-critical the
-  # memory is (set by the curator), while similarity encodes how relevant it
-  # is to *this specific query*. Neither alone is sufficient.
-  defp recall_score(memory, nil), do: memory.importance
-  defp recall_score(%{embedding: nil} = memory, _query_vec), do: memory.importance
-  defp recall_score(memory, query_vec) do
-    sim = cosine_similarity(memory.embedding, query_vec)
-    sim * 0.6 + memory.importance * 0.4
+  # Term frequency score: count how many query tokens appear in this memory's
+  # summary, facts, and tags. Simple but effective — BM25 is overkill for
+  # per-tenant ETS tables with < 2,000 entries.
+  defp keyword_score(_memory, []), do: 0
+  defp keyword_score(memory, query_tokens) do
+    text = String.downcase("#{memory.summary || ""} #{Enum.join(memory.facts || [], " ")} #{Enum.join(memory.tags || [], " ")}")
+    words = String.split(text)
+    Enum.reduce(query_tokens, 0, fn token, acc ->
+      acc + Enum.count(words, &(&1 == token))
+    end)
   end
 
+  # Graceful cosine similarity that returns nil when either vector is absent.
+  # This lets the RRF fusion skip the vector signal cleanly rather than
+  # producing a meaningless 0.0 similarity score.
+  defp cosine_similarity_or_nil(nil, _), do: nil
+  defp cosine_similarity_or_nil(_, nil), do: nil
+  defp cosine_similarity_or_nil(embedding, query_vec), do: cosine_similarity(embedding, query_vec)
+
+  # True cosine similarity: A·B / (||A|| * ||B|| + epsilon).
+  #
+  # This handles both pre-normalized vectors (Stub's embed/1 already
+  # L2-normalizes) and raw vectors (llama.cpp embeddings may not be).
+  # The epsilon prevents division by zero on zero-vector inputs.
+  #
+  # Pure Elixir, no Nx dependency. Fast enough for hackathon scale
+  # (thousands of 64-768 dim vectors = microseconds). Swap for Nx batch
+  # ops in production when scanning 10k+ memories per recall.
   defp cosine_similarity(a, b) when length(a) == length(b) do
-    Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
+    dot = Enum.zip(a, b) |> Enum.reduce(0.0, fn {x, y}, acc -> acc + x * y end)
+    norm_a = :math.sqrt(Enum.reduce(a, 0.0, fn x, acc -> acc + x * x end))
+    norm_b = :math.sqrt(Enum.reduce(b, 0.0, fn x, acc -> acc + x * x end))
+    dot / (norm_a * norm_b + 1.0e-8)
   end
   defp cosine_similarity(_, _), do: 0.0
 
@@ -175,7 +239,110 @@ defmodule Librarian.WarmStore do
     all() |> Enum.filter(&(&1.importance < threshold and is_nil(&1.superseded_by)))
   end
 
+  @doc """
+  Dump all WARM memories to a JSONL snapshot file on disk.
+  Called on shutdown so memories survive a restart.
+  """
+  def dump do
+    path = snapshot_path()
+    File.mkdir_p!(Path.dirname(path))
+
+    all()
+    |> Enum.map(fn m ->
+      %{
+        id: m.id,
+        bucket: m.bucket,
+        summary: m.summary,
+        facts: m.facts,
+        tags: m.tags,
+        embedding: m.embedding,
+        importance: m.importance,
+        created_at: DateTime.to_iso8601(m.created_at),
+        last_accessed_at: DateTime.to_iso8601(m.last_accessed_at),
+        superseded_by: m.superseded_by,
+        access_count: m.access_count
+      }
+    end)
+    |> Enum.each(fn map ->
+      File.write!(path, Librarian.Json.encode(map) <> "\n", [:append])
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Load WARM memories from a JSONL snapshot file on disk.
+  Called on startup to restore memories from the last shutdown.
+  Deletes the file after loading so fresh restarts start clean.
+  """
+  def load do
+    path = snapshot_path()
+
+    if File.exists?(path) do
+      lines =
+        path
+        |> File.read!()
+        |> String.split("\n", trim: true)
+
+      Enum.each(lines, fn line ->
+        case Librarian.Json.decode(line) do
+          {:ok, map} ->
+            created = parse_datetime(map["created_at"])
+            accessed = parse_datetime(map["last_accessed_at"])
+
+            memory = %__MODULE__.Memory{
+              id: map["id"],
+              bucket: map["bucket"],
+              summary: map["summary"],
+              facts: map["facts"] || [],
+              tags: map["tags"] || [],
+              embedding: map["embedding"],
+              importance: map["importance"] || 0.5,
+              created_at: created,
+              last_accessed_at: accessed,
+              superseded_by: map["superseded_by"],
+              access_count: map["access_count"] || 0
+            }
+
+            GenServer.call(__MODULE__, {:load, memory})
+
+          _ ->
+            :ok
+        end
+      end)
+
+      File.rm!(path)
+      :loaded
+    else
+      :no_snapshot
+    end
+  end
+
+  defp snapshot_path do
+    Path.join([Application.get_env(:librarian, :cold_dir, "priv/cold"), "warm_snapshot.jsonl"])
+  end
+
+  defp parse_datetime(nil), do: DateTime.utc_now()
+  defp parse_datetime(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _} -> dt
+      _ -> DateTime.utc_now()
+    end
+  end
+
   # --- GenServer ---
+
+  @impl true
+  def terminate(_reason, _state) do
+    dump()
+  end
+
+  @impl true
+  def handle_call({:load, memory}, _from, %{table: table, next_id: id} = state) do
+    next_id = max(id, (memory.id || 0) + 1)
+    :ets.insert(table, {memory.id, memory})
+    {:reply, :ok, %{state | next_id: next_id}}
+  end
 
   @impl true
   def handle_call({:put, bucket, result}, _from, %{table: table, next_id: id} = state) do

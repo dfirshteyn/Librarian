@@ -1,0 +1,48 @@
+# Librarian — local-first tiered memory daemon
+# Docker Compose for Alibaba ECS deployment
+#
+# Usage:
+#   docker compose up -d              # start (uses default config)
+#   docker compose -f docker-compose.yml up -d
+#
+# Environment overrides (create a .env file or set in ECS environment):
+#   DASHSCOPE_API_KEY=sk-...          # Qwen API key
+#   LLAMA_CPP_URL=http://host:1234/v1 # llama.cpp endpoint (optional)
+#   SECRET_KEY_BASE=...               # Phoenix secret (auto-generated if missing)
+#   DATABASE_URL=ecto://...           # Postgres (SQLite file used by default)
+
+services:
+  librarian:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"   # HTTP (REST API + Dashboard)
+      - "4001:4001"   # WebSocket (Chrome extension)
+    environment:
+      - MIX_ENV=prod
+      - PORT=4000
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLAMA_CPP_URL=${LLAMA_CPP_URL:-}
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE:-}
+      # Database: uses SQLite file by default — mount a volume to persist
+      # For Postgres (production), set DATABASE_URL instead
+      - DATABASE_URL=${DATABASE_URL:-}
+      - RELEASE_NODE=bookworm@127.0.0.1
+      - RELEASE_DISTRIBUTION=name
+      - RELEASE_COOKIE=librarian_hackathon_2026
+    volumes:
+      - librarian_data:/app/priv
+      - librarian_wal:/app/priv/wal
+      - librarian_cold:/app/priv/cold
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  librarian_data:
+  librarian_wal:
+  librarian_cold:

@@ -40,6 +40,34 @@ defmodule Librarian.Curator.QwenApi do
     {:error, :not_implemented}
   end
 
+  @doc """
+  Deep reasoning pass over all WARM memories. Called by the Hybrid
+  curator on a schedule (not on the hot path). Asks Qwen to:
+    - Re-rank importance scores
+    - Detect contradictions between memories
+    - Suggest cross-bucket connections the small model missed
+    - Propose new tags for improved recall
+
+  Returns a list of suggested actions (supersessions, tag updates,
+  re-scoring) that the caller applies.
+  """
+  def deep_pass(memories) when is_list(memories) do
+    text =
+      memories
+      |> Enum.with_index()
+      |> Enum.map(fn {m, i} ->
+        "#{i + 1}. [#{m.bucket}] #{m.summary} (tags: #{Enum.join(m.tags || [], ", ")}, importance: #{m.importance})"
+      end)
+      |> Enum.join("\n")
+
+    {prompt, _} = Librarian.LeakGuard.scrub(build_deep_pass_prompt(text))
+
+    with {:ok, body} <- chat(prompt),
+         {:ok, actions} <- parse_deep_pass(body) do
+      {:ok, actions}
+    end
+  end
+
   # --- internals ---
 
   defp build_prompt(text) do
@@ -114,4 +142,38 @@ defmodule Librarian.Curator.QwenApi do
   defp to_float(v) when is_float(v), do: v
   defp to_float(v) when is_integer(v), do: v / 1
   defp to_float(_), do: 0.5
+
+  defp build_deep_pass_prompt(text) do
+    """
+    You are a senior memory curator performing a nightly deep-reasoning pass.
+    Below are all current WARM memories with their bucket, summary, tags, and importance.
+
+    Analyze them and return a JSON object with exactly these keys:
+    - "supersessions": a JSON array of objects, each with "old_id" (integer) and "new_id" (integer) — memories where the later one clearly contradicts or replaces the earlier one in the same bucket
+    - "re_scores": a JSON array of objects, each with "id" (integer) and "importance" (float 0.0-1.0) — memories whose importance you'd adjust based on how decision-critical they appear
+    - "cross_connections": a JSON array of objects, each with "id_a" (integer), "id_b" (integer), and "note" (string) — cross-bucket connections the curator should log as synaptic jumps
+    - "new_tags": a JSON array of objects, each with "id" (integer) and "tags" (array of strings) — suggested additional tags for better recall
+
+    Be conservative. Only flag clear contradictions or strong connections.
+    Respond with ONLY the JSON object, no markdown, no explanation.
+
+    Memories:
+    #{text}
+    """
+  end
+
+  defp parse_deep_pass(body) do
+    with content when is_binary(content) <- get_in(body, ["choices", Access.at(0), "message", "content"]),
+         {:ok, map} <- Librarian.Json.decode(content) do
+      {:ok, %{
+        supersessions: map["supersessions"] || [],
+        re_scores: map["re_scores"] || [],
+        cross_connections: map["cross_connections"] || [],
+        new_tags: map["new_tags"] || []
+      }}
+    else
+      nil -> {:error, :missing_content}
+      {:error, _} = err -> err
+    end
+  end
 end

@@ -20,6 +20,7 @@ defmodule Librarian.Application do
     case Supervisor.start_link(children, opts) do
       {:ok, sup} ->
         recover_pending_wals()
+        recover_warm_snapshot()
         {:ok, sup}
       error ->
         error
@@ -36,6 +37,17 @@ defmodule Librarian.Application do
     end
   end
 
+  defp recover_warm_snapshot do
+    case Librarian.WarmStore.load() do
+      :loaded ->
+        require Logger
+        Logger.info("Librarian: restored WARM memories from snapshot")
+
+      :no_snapshot ->
+        :ok
+    end
+  end
+
   defp maybe_add_ws_server(children) do
     if Application.get_env(:librarian, :start_ws_server, false) do
       port = Application.get_env(:librarian, :ws_port, 4001)
@@ -45,4 +57,3 @@ defmodule Librarian.Application do
     end
   end
 end
-

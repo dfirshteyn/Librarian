@@ -27,3 +27,9 @@ config :librarian, LibrarianWeb.Endpoint,
   ]
 
 config :librarian, :start_ws_server, false
+
+# Local model backend — uncomment to use real models instead of Stub
+config :librarian, curator: Librarian.Curator.Hybrid
+config :librarian, llama_cpp_url: "http://localhost:1234/v1"
+config :librarian, embed_url: "http://localhost:1235/v1"
+config :librarian, llama_cpp_timeout_ms: 120_000

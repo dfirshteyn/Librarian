@@ -22,6 +22,7 @@ defmodule LibrarianWeb.Router do
   scope "/api", LibrarianWeb do
     pipe_through :api
     post "/ingest", ApiController, :ingest
+    post "/flush",  ApiController, :flush
     get  "/recall", ApiController, :recall
     get  "/status", ApiController, :status
   end

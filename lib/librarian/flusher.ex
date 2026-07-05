@@ -120,13 +120,19 @@ defmodule Librarian.Flusher do
   end
 
   @doc """
-  The "nightly curator" / dream-cycle pass: decay (per-bucket policy
-  applies — see `Librarian.WarmStore.decay_all/1`), then archive whatever
-  fell below the threshold. Cross-bucket associative links discovered
-  during the day (via `maybe_supersede/1`, or `Librarian.recall/1`'s
-  synaptic-jump lookups) are already logged to `priv/cold/insights.jsonl`
-  as they happen — `nightly_pass` doesn't need to redo that work, just
-  the decay/archive housekeeping.
+  The "nightly curator" / dream-cycle pass:
+
+    1. Decay WARM memory importance (per-bucket policy applies — see
+       `Librarian.WarmStore.decay_all/1`).
+    2. Archive whatever fell below the threshold to COLD.
+    3. Run a Qwen deep-reasoning pass over all WARM memories when
+       the Hybrid curator is configured — this finds cross-bucket
+       connections, detects contradictions, and re-ranks importance
+       scores that the local small model may have gotten wrong.
+
+  Cross-bucket associative links discovered during the day (via
+  `maybe_supersede/1`, or `Librarian.recall/1`'s synaptic-jump lookups)
+  are already logged to `priv/cold/insights.jsonl` as they happen.
   """
   def nightly_pass(opts \\ []) do
     half_life = Keyword.get(opts, :half_life_seconds, 60 * 60 * 24 * 14)
@@ -134,6 +140,69 @@ defmodule Librarian.Flusher do
 
     Librarian.WarmStore.decay_all(half_life)
     archived = archive_stale(threshold)
-    %{archived: archived}
+
+    # Deep pass: only when Hybrid curator is configured
+    deep =
+      case Application.get_env(:librarian, :curator, Librarian.Curator.Stub) do
+        Librarian.Curator.Hybrid ->
+          memories = Librarian.WarmStore.all()
+          case Librarian.Curator.Hybrid.deep_pass(memories) do
+            {:ok, actions} ->
+              apply_deep_pass_actions(actions)
+              actions
+
+            {:error, reason} ->
+              require Logger
+              Logger.warning("Nightly pass deep_pass failed: #{inspect(reason)}")
+              %{error: reason}
+          end
+
+        _ ->
+          %{skipped: :no_hybrid_curator}
+      end
+
+    %{archived: archived, deep: deep}
+  end
+
+  defp apply_deep_pass_actions(actions) do
+    # Apply supersessions Qwen detected
+    Enum.each(actions[:supersessions] || [], fn %{"old_id" => old_id, "new_id" => new_id} ->
+      Librarian.WarmStore.supersede(old_id, new_id)
+      Librarian.ColdStore.log_insight(%{
+        "kind" => "deep_supersession",
+        "old_id" => old_id,
+        "new_id" => new_id
+      })
+    end)
+
+    # Apply re-scores
+    Enum.each(actions[:re_scores] || [], fn %{"id" => id, "importance" => imp} ->
+      case Librarian.WarmStore.get(id) do
+        nil -> :ok
+        memory ->
+          updated = %{memory | importance: imp}
+          :ets.insert(Librarian.WarmStore, {id, updated})
+      end
+    end)
+
+    # Log cross-connections as insights
+    Enum.each(actions[:cross_connections] || [], fn conn ->
+      Librarian.ColdStore.log_insight(%{
+        "kind" => "deep_cross_connection",
+        "id_a" => conn["id_a"],
+        "id_b" => conn["id_b"],
+        "note" => conn["note"]
+      })
+    end)
+
+    # Apply new tags
+    Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
+      case Librarian.WarmStore.get(id) do
+        nil -> :ok
+        memory ->
+          updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}
+          :ets.insert(Librarian.WarmStore, {id, updated})
+      end
+    end)
   end
 end

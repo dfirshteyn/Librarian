@@ -57,6 +57,25 @@ defmodule LibrarianWeb.ApiController do
     json(conn, Map.put(Librarian.status(user_id), :ok, true))
   end
 
+  @doc """
+  POST /api/flush
+  Optional header: X-User-Id (defaults to "local")
+  Optional body: {"bucket": "local:project"} (defaults to all buckets)
+
+  Drains HOT buffers to WARM through the configured curator.
+  """
+  def flush(conn, params) do
+    bucket = params["bucket"] || "all"
+
+    results =
+      case bucket do
+        "all" -> Librarian.Flusher.flush_all()
+        b -> [Librarian.Flusher.flush_bucket(b)]
+      end
+
+    json(conn, %{ok: true, bucket: bucket, results: inspect(results)})
+  end
+
   # X-User-Id header for multi-tenant — in production this would be
   # validated against a session token. For the hackathon, trust the header.
   defp get_user_id(conn) do

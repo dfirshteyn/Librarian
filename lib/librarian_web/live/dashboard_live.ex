@@ -28,6 +28,8 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:hot_counts, hot_counts())
      |> assign(:query, "")
      |> assign(:recall_results, nil)
+     |> assign(:insights, Librarian.morning_briefing(20))
+     |> assign(:token_savings, compute_token_savings())
      |> assign(:bucket_colors, @bucket_colors)}
   end
 
@@ -52,14 +54,17 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply,
      socket
      |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
-     |> assign(:hot_counts, hot_counts())}
+     |> assign(:hot_counts, hot_counts())
+     |> assign(:token_savings, compute_token_savings())}
   end
 
   def handle_info(:refresh_warm, socket) do
     {:noreply,
      socket
      |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
-     |> assign(:hot_counts, hot_counts())}
+     |> assign(:hot_counts, hot_counts())
+     |> assign(:insights, Librarian.morning_briefing(20))
+     |> assign(:token_savings, compute_token_savings())}
   end
 
   @impl true
@@ -78,6 +83,7 @@ defmodule LibrarianWeb.DashboardLive do
      socket
      |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
      |> assign(:hot_counts, hot_counts())
+     |> assign(:token_savings, compute_token_savings())
      |> put_flash(:info, "Flushed all buckets")}
   end
 
@@ -98,6 +104,63 @@ defmodule LibrarianWeb.DashboardLive do
   defp bucket_color(bucket, colors), do: Map.get(colors, bucket, "bg-gray-500")
   defp importance_pct(importance), do: "width: #{trunc((importance || 0) * 100)}%"
 
+  # Token savings: compare total raw_text length (estimated from summary + facts)
+  # vs what the raw capture would have been. Shows the compression ratio.
+  defp compute_token_savings do
+    memories = WarmStore.all() |> Enum.reject(&(&1.superseded_by))
+
+    if memories == [] do
+      %{savings_pct: 0, raw_tokens: 0, curated_tokens: 0}
+    else
+      # Estimate: 1 token ≈ 4 characters for English text
+      raw_tokens =
+        memories
+        |> Enum.map(fn m ->
+          # Estimate original raw text length from summary + facts (conservative)
+          (String.length(m.summary || "") + Enum.join(m.facts || [], " ")) |> div(4)
+        end)
+        |> Enum.sum()
+
+      # What the curated memory stores (summary + facts + tags)
+      curated_tokens =
+        memories
+        |> Enum.map(fn m ->
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")) + String.length(Enum.join(m.tags || [], " "))) |> div(4)
+        end)
+        |> Enum.sum()
+
+      savings_pct =
+        if raw_tokens > 0 do
+          trunc((1 - curated_tokens / max(raw_tokens, 1)) * 100)
+        else
+          0
+        end
+
+      %{savings_pct: savings_pct, raw_tokens: raw_tokens, curated_tokens: curated_tokens}
+    end
+  end
+
+  defp insight_icon("supersession"), do: "🔄"
+  defp insight_icon("deep_supersession"), do: "⚠️"
+  defp insight_icon("deep_cross_connection"), do: "🔗"
+  defp insight_icon(_), do: "💡"
+
+  defp insight_summary(%{"kind" => "supersession"} = m) do
+    "Superseded: \"#{m["old_summary"]}\" → \"#{m["new_summary"]}\""
+  end
+
+  defp insight_summary(%{"kind" => "deep_supersession"} = m) do
+    "Qwen flagged contradiction: memory ##{m["old_id"]} superseded by ##{m["new_id"]}"
+  end
+
+  defp insight_summary(%{"kind" => "deep_cross_connection"} = m) do
+    "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
+  end
+
+  defp insight_summary(m) do
+    inspect(m)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -109,7 +172,14 @@ defmodule LibrarianWeb.DashboardLive do
           <h1 class="text-2xl font-bold text-white">📚 Librarian</h1>
           <p class="text-gray-400 text-sm">local-first memory daemon · BEAM/OTP</p>
         </div>
-        <div class="flex gap-3">
+        <div class="flex items-center gap-4">
+          <%!-- Token savings badge --%>
+          <div class="bg-gray-800 rounded px-3 py-1.5 text-xs">
+            <span class="text-gray-400">Token savings: </span>
+            <span class="text-green-400 font-bold"><%= @token_savings.savings_pct %>%</span>
+            <span class="text-gray-600"> | </span>
+            <span class="text-gray-400"><%= @token_savings.curated_tokens %> curated</span>
+          </div>
           <button phx-click="flush_all"
             class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">
             Flush HOT → WARM
@@ -134,9 +204,13 @@ defmodule LibrarianWeb.DashboardLive do
           <span class="text-xs text-gray-300">WARM</span>
           <span class="text-xs font-bold text-white"><%= length(@memories) %></span>
         </div>
+        <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
+          <span class="text-xs text-gray-300">🔢 embedded</span>
+          <span class="text-xs font-bold text-white"><%= Enum.count(@memories, &(not is_nil(&1.embedding))) %></span>
+        </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-4 h-[calc(100vh-200px)]">
+      <div class="grid grid-cols-4 gap-4 h-[calc(100vh-200px)]">
 
         <%!-- Left: live ingest feed --%>
         <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
@@ -161,7 +235,7 @@ defmodule LibrarianWeb.DashboardLive do
           </div>
         </div>
 
-        <%!-- Middle: WARM memory cards --%>
+        <%!-- Second: WARM memory cards --%>
         <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
           <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
             🧠 WARM Memory Tier
@@ -192,7 +266,7 @@ defmodule LibrarianWeb.DashboardLive do
           </div>
         </div>
 
-        <%!-- Right: recall console --%>
+        <%!-- Third: recall console --%>
         <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
           <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
             🔍 Recall Console
@@ -244,7 +318,43 @@ defmodule LibrarianWeb.DashboardLive do
               </p>
             <% else %>
               <p class="text-gray-600 text-xs">Enter a query to search WARM memories.</p>
-              <p class="text-gray-700 text-xs mt-2">Ranked by cosine similarity + importance.</p>
+              <p class="text-gray-700 text-xs mt-2">3-way RRF: keyword + BGE-M3 vector + importance.</p>
+            <% end %>
+          </div>
+        </div>
+
+        <%!-- Fourth: Connections / Insights panel --%>
+        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
+          <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
+            🔗 Connections & Insights
+          </h2>
+          <div class="flex-1 overflow-y-auto space-y-3">
+            <%= if @insights == [] do %>
+              <p class="text-gray-600 text-xs">
+                No insights yet. Run the Nightly Pass (Qwen) to discover cross-bucket connections, contradictions, and patterns.
+              </p>
+              <div class="bg-gray-800 rounded p-3 border border-gray-700 mt-2">
+                <p class="text-xs text-gray-400">
+                  The Qwen deep pass analyzes all WARM memories together to find:
+                </p>
+                <ul class="text-xs text-gray-500 mt-2 space-y-1 list-disc list-inside">
+                  <li>Cross-bucket connections (synaptic jumps)</li>
+                  <li>Contradictions between decisions</li>
+                  <li>Repeated patterns across sessions</li>
+                  <li>Re-ranking of importance scores</li>
+                </ul>
+              </div>
+            <% else %>
+              <%= for insight <- @insights do %>
+                <div class="bg-gray-800 rounded p-3 border border-gray-700">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs"><%= insight_icon(insight["kind"]) %></span>
+                    <span class="text-xs text-gray-400"><%= insight["kind"] %></span>
+                    <span class="text-xs text-gray-600 ml-auto"><%= insight["logged_at"] %></span>
+                  </div>
+                  <p class="text-xs text-gray-300"><%= insight_summary(insight) %></p>
+                </div>
+              <% end %>
             <% end %>
           </div>
         </div>

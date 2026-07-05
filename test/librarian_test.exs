@@ -175,9 +175,18 @@ defmodule Librarian.WarmStore.DecayPolicyTest do
 
     WarmStore.supersede(old.id, new.id)
 
-    assert WarmStore.recall("postgres") == []
-    assert [reloaded] = WarmStore.recall("postgres", "local", include_superseded: true)
-    assert reloaded.superseded_by == new.id
+    # With 3-way RRF, no hard keyword filter — "postgres" recall returns the
+    # new memory (ranked by importance + keyword signal), but never the
+    # superseded old one (it's still in ETS but filtered out by default)
+    result = WarmStore.recall("postgres")
+    refute Enum.any?(result, &(&1.id == old.id))
+
+    # include_superseded: true surfaces all memories including superseded ones.
+    # Find the old one specifically by id to verify it was flagged.
+    all_with_superseded = WarmStore.recall("postgres", "local", include_superseded: true)
+    reloaded_old = Enum.find(all_with_superseded, &(&1.id == old.id))
+    assert reloaded_old != nil
+    assert reloaded_old.superseded_by == new.id
   end
 end
 
@@ -234,7 +243,15 @@ defmodule Librarian.SynapticJumpTest do
 
     %{warm: warm, related: related} = Librarian.recall("deploy")
 
-    assert length(warm) == 1
+    # With 3-way RRF, both memories appear in warm results even though "ideas"
+    # doesn't contain the keyword "deploy" — it's ranked by importance.
+    # The project memory ranks first (keyword "deploy" match + higher importance).
+    assert length(warm) == 2
+    assert hd(warm).bucket == "local:project"
+    assert hd(warm).summary == "deploy uses sqlite now"
+
+    # The ideas memory is also surfaced as a cross-bucket synaptic jump via
+    # tag overlap with the top project result (shared tag: "sqlite").
     assert length(related) == 1
     assert hd(related).bucket == "local:ideas"
   end
