@@ -14,3 +14,5 @@ config :librarian, LibrarianWeb.Endpoint,
   server: false
 
 config :librarian, :start_ws_server, false
+
+config :librarian, :db_dir, "tmp/test_data"

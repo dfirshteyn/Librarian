@@ -66,21 +66,29 @@ defmodule Librarian.Flusher do
   defp maybe_supersede(%Librarian.WarmStore.Memory{} = new_memory) do
     policies = Application.get_env(:librarian, :decay_policies, %{})
     bare = new_memory.bucket |> String.split(":") |> List.last()
-    policy = Map.get(policies, new_memory.bucket,
-      Map.get(policies, bare,
-        Application.get_env(:librarian, :default_decay_policy, :decay)))
+
+    policy =
+      Map.get(
+        policies,
+        new_memory.bucket,
+        Map.get(policies, bare, Application.get_env(:librarian, :default_decay_policy, :decay))
+      )
 
     if policy == :supersede do
       candidates =
         Librarian.WarmStore.by_bucket(new_memory.bucket)
         |> Enum.filter(&(&1.id != new_memory.id and is_nil(&1.superseded_by)))
 
-      case Enum.find(candidates, &tag_overlap_ratio(&1.tags, new_memory.tags) >= @supersede_tag_overlap_threshold) do
+      case Enum.find(
+             candidates,
+             &(tag_overlap_ratio(&1.tags, new_memory.tags) >= @supersede_tag_overlap_threshold)
+           ) do
         nil ->
           :ok
 
         old_memory ->
           Librarian.WarmStore.supersede(old_memory.id, new_memory.id)
+
           Librarian.ColdStore.log_insight(%{
             "kind" => "supersession",
             "bucket" => new_memory.bucket,
@@ -100,7 +108,10 @@ defmodule Librarian.Flusher do
     a = MapSet.new(tags_a)
     b = MapSet.new(tags_b)
     smaller = min(MapSet.size(a), MapSet.size(b))
-    if smaller == 0, do: 0.0, else: MapSet.intersection(a, b) |> MapSet.size() |> Kernel./(smaller)
+
+    if smaller == 0,
+      do: 0.0,
+      else: MapSet.intersection(a, b) |> MapSet.size() |> Kernel./(smaller)
   end
 
   @doc "Flush every bucket that currently has HOT data."
@@ -113,7 +124,8 @@ defmodule Librarian.Flusher do
   def archive_stale(threshold \\ 0.15) do
     Librarian.WarmStore.low_relevance(threshold)
     |> Enum.map(fn memory ->
-      Librarian.ColdStore.archive(memory)
+      user_id = memory.bucket |> String.split(":") |> hd()
+      Librarian.ColdStore.archive(memory, user_id)
       Librarian.WarmStore.forget(memory.id)
       memory.id
     end)
@@ -146,6 +158,7 @@ defmodule Librarian.Flusher do
       case Application.get_env(:librarian, :curator, Librarian.Curator.Stub) do
         Librarian.Curator.Hybrid ->
           memories = Librarian.WarmStore.all()
+
           case Librarian.Curator.Hybrid.deep_pass(memories) do
             {:ok, actions} ->
               apply_deep_pass_actions(actions)
@@ -168,6 +181,7 @@ defmodule Librarian.Flusher do
     # Apply supersessions Qwen detected
     Enum.each(actions[:supersessions] || [], fn %{"old_id" => old_id, "new_id" => new_id} ->
       Librarian.WarmStore.supersede(old_id, new_id)
+
       Librarian.ColdStore.log_insight(%{
         "kind" => "deep_supersession",
         "old_id" => old_id,
@@ -178,7 +192,9 @@ defmodule Librarian.Flusher do
     # Apply re-scores
     Enum.each(actions[:re_scores] || [], fn %{"id" => id, "importance" => imp} ->
       case Librarian.WarmStore.get(id) do
-        nil -> :ok
+        nil ->
+          :ok
+
         memory ->
           updated = %{memory | importance: imp}
           :ets.insert(Librarian.WarmStore, {id, updated})
@@ -198,7 +214,9 @@ defmodule Librarian.Flusher do
     # Apply new tags
     Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
       case Librarian.WarmStore.get(id) do
-        nil -> :ok
+        nil ->
+          :ok
+
         memory ->
           updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}
           :ets.insert(Librarian.WarmStore, {id, updated})

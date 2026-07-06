@@ -4,12 +4,12 @@ defmodule LibrarianWeb.DashboardLive do
   alias Librarian.{WarmStore, HotStore, Flusher}
 
   @bucket_colors %{
-    "project"  => "bg-blue-500",
+    "project" => "bg-blue-500",
     "research" => "bg-purple-500",
-    "finance"  => "bg-green-500",
-    "ideas"    => "bg-yellow-500",
+    "finance" => "bg-green-500",
+    "ideas" => "bg-yellow-500",
     "thoughts" => "bg-pink-500",
-    "inbox"    => "bg-gray-500"
+    "inbox" => "bg-gray-500"
   }
 
   @impl true
@@ -24,7 +24,7 @@ defmodule LibrarianWeb.DashboardLive do
      socket
      |> stream(:feed, [])
      |> assign(:feed_empty, true)
-     |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
+     |> assign(:memories, WarmStore.all() |> Enum.reject(& &1.superseded_by))
      |> assign(:hot_counts, hot_counts())
      |> assign(:query, "")
      |> assign(:recall_results, nil)
@@ -53,7 +53,7 @@ defmodule LibrarianWeb.DashboardLive do
   def handle_info({:flushed, _bucket}, socket) do
     {:noreply,
      socket
-     |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
+     |> assign(:memories, WarmStore.all() |> Enum.reject(& &1.superseded_by))
      |> assign(:hot_counts, hot_counts())
      |> assign(:token_savings, compute_token_savings())}
   end
@@ -61,7 +61,7 @@ defmodule LibrarianWeb.DashboardLive do
   def handle_info(:refresh_warm, socket) do
     {:noreply,
      socket
-     |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
+     |> assign(:memories, WarmStore.all() |> Enum.reject(& &1.superseded_by))
      |> assign(:hot_counts, hot_counts())
      |> assign(:insights, Librarian.morning_briefing(20))
      |> assign(:token_savings, compute_token_savings())}
@@ -79,9 +79,10 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_event("flush_all", _params, socket) do
     Flusher.flush_all()
+
     {:noreply,
      socket
-     |> assign(:memories, WarmStore.all() |> Enum.reject(&(&1.superseded_by)))
+     |> assign(:memories, WarmStore.all() |> Enum.reject(& &1.superseded_by))
      |> assign(:hot_counts, hot_counts())
      |> assign(:token_savings, compute_token_savings())
      |> put_flash(:info, "Flushed all buckets")}
@@ -92,6 +93,7 @@ defmodule LibrarianWeb.DashboardLive do
       Flusher.nightly_pass()
       Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all})
     end)
+
     {:noreply, put_flash(socket, :info, "Nightly pass started (async)")}
   end
 
@@ -107,7 +109,7 @@ defmodule LibrarianWeb.DashboardLive do
   # Token savings: compare total raw_text length (estimated from summary + facts)
   # vs what the raw capture would have been. Shows the compression ratio.
   defp compute_token_savings do
-    memories = WarmStore.all() |> Enum.reject(&(&1.superseded_by))
+    memories = WarmStore.all() |> Enum.reject(& &1.superseded_by)
 
     if memories == [] do
       %{savings_pct: 0, raw_tokens: 0, curated_tokens: 0}
@@ -117,7 +119,7 @@ defmodule LibrarianWeb.DashboardLive do
         memories
         |> Enum.map(fn m ->
           # Estimate original raw text length from summary + facts (conservative)
-          (String.length(m.summary || "") + Enum.join(m.facts || [], " ")) |> div(4)
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " "))) |> div(4)
         end)
         |> Enum.sum()
 
@@ -125,7 +127,9 @@ defmodule LibrarianWeb.DashboardLive do
       curated_tokens =
         memories
         |> Enum.map(fn m ->
-          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")) + String.length(Enum.join(m.tags || [], " "))) |> div(4)
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")) +
+             String.length(Enum.join(m.tags || [], " ")))
+          |> div(4)
         end)
         |> Enum.sum()
 

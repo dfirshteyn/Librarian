@@ -57,7 +57,8 @@ defmodule Librarian.Curator.StubTest do
     chunk = [
       %Payload{
         source: "test",
-        raw_text: "We decided to switch the database from Postgres to SQLite. It was a long discussion."
+        raw_text:
+          "We decided to switch the database from Postgres to SQLite. It was a long discussion."
       }
     ]
 
@@ -139,8 +140,18 @@ defmodule Librarian.WarmStore.DecayPolicyTest do
   test "a :supersede-policy bucket does not decay with time" do
     Application.put_env(:librarian, :decay_policies, %{"local:project" => :supersede})
 
-    memory = WarmStore.put("local:project", %Curator.Result{summary: "s", facts: [], tags: ["x"], importance: 0.8})
-    :ets.insert(:warm_memories, {memory.id, %{memory | last_accessed_at: DateTime.add(DateTime.utc_now(), -10_000_000)}})
+    memory =
+      WarmStore.put("local:project", %Curator.Result{
+        summary: "s",
+        facts: [],
+        tags: ["x"],
+        importance: 0.8
+      })
+
+    :ets.insert(
+      :warm_memories,
+      {memory.id, %{memory | last_accessed_at: DateTime.add(DateTime.utc_now(), -10_000_000)}}
+    )
 
     WarmStore.decay_all(60)
 
@@ -152,12 +163,33 @@ defmodule Librarian.WarmStore.DecayPolicyTest do
     Application.put_env(:librarian, :decay_policies, %{})
     Application.put_env(:librarian, :default_decay_policy, :decay)
 
-    fresh = WarmStore.put("local:ideas", %Curator.Result{summary: "a", facts: [], tags: ["x"], importance: 0.8})
-    often_recalled = WarmStore.put("local:ideas", %Curator.Result{summary: "b", facts: [], tags: ["y"], importance: 0.8})
+    fresh =
+      WarmStore.put("local:ideas", %Curator.Result{
+        summary: "a",
+        facts: [],
+        tags: ["x"],
+        importance: 0.8
+      })
+
+    often_recalled =
+      WarmStore.put("local:ideas", %Curator.Result{
+        summary: "b",
+        facts: [],
+        tags: ["y"],
+        importance: 0.8
+      })
 
     long_ago = DateTime.add(DateTime.utc_now(), -300)
-    :ets.insert(:warm_memories, {fresh.id, %{fresh | last_accessed_at: long_ago, access_count: 0}})
-    :ets.insert(:warm_memories, {often_recalled.id, %{often_recalled | last_accessed_at: long_ago, access_count: 20}})
+
+    :ets.insert(
+      :warm_memories,
+      {fresh.id, %{fresh | last_accessed_at: long_ago, access_count: 0}}
+    )
+
+    :ets.insert(
+      :warm_memories,
+      {often_recalled.id, %{often_recalled | last_accessed_at: long_ago, access_count: 20}}
+    )
 
     WarmStore.decay_all(60)
 
@@ -170,8 +202,21 @@ defmodule Librarian.WarmStore.DecayPolicyTest do
   test "supersede keeps the old memory but flags it and excludes it from recall by default" do
     Application.put_env(:librarian, :decay_policies, %{"local:project" => :supersede})
 
-    old = WarmStore.put("local:project", %Curator.Result{summary: "using postgres", facts: [], tags: ["db"], importance: 0.7})
-    new = WarmStore.put("local:project", %Curator.Result{summary: "switched to sqlite", facts: [], tags: ["db"], importance: 0.7})
+    old =
+      WarmStore.put("local:project", %Curator.Result{
+        summary: "using postgres",
+        facts: [],
+        tags: ["db"],
+        importance: 0.7
+      })
+
+    new =
+      WarmStore.put("local:project", %Curator.Result{
+        summary: "switched to sqlite",
+        facts: [],
+        tags: ["db"],
+        importance: 0.7
+      })
 
     WarmStore.supersede(old.id, new.id)
 
@@ -203,10 +248,18 @@ defmodule Librarian.FlusherSupersessionTest do
   end
 
   test "flushing a contradicting decision in a :supersede bucket auto-supersedes the prior one" do
-    Librarian.ingest(%{"source" => "test", "raw_text" => "we decided to deploy using the postgres database for the project"})
+    Librarian.ingest(%{
+      "source" => "test",
+      "raw_text" => "we decided to deploy using the postgres database for the project"
+    })
+
     {:ok, first} = Librarian.Flusher.flush_bucket("local:project")
 
-    Librarian.ingest(%{"source" => "test", "raw_text" => "we decided to deploy using the sqlite database for the project"})
+    Librarian.ingest(%{
+      "source" => "test",
+      "raw_text" => "we decided to deploy using the sqlite database for the project"
+    })
+
     {:ok, second} = Librarian.Flusher.flush_bucket("local:project")
 
     reloaded_first = Librarian.WarmStore.all() |> Enum.find(&(&1.id == first.id))
@@ -368,10 +421,12 @@ defmodule Librarian.WalCrashRecoveryTest do
     on_exit(fn ->
       wal_path = "priv/wal/#{@recovery_bucket}.wal"
       if File.exists?(wal_path), do: File.rm!(wal_path)
+
       case Registry.lookup(Librarian.BucketRegistry, @recovery_bucket) do
         [{pid, _}] -> Process.exit(pid, :kill)
         [] -> :ok
       end
+
       Process.sleep(30)
     end)
   end

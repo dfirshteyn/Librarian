@@ -115,9 +115,16 @@ defmodule Librarian.WsServer do
 
     {payload_len, rest} =
       case len7 do
-        126 -> <<len::16, rest::binary>> = rest; {len, rest}
-        127 -> <<len::64, rest::binary>> = rest; {len, rest}
-        len -> {len, rest}
+        126 ->
+          <<len::16, rest::binary>> = rest
+          {len, rest}
+
+        127 ->
+          <<len::64, rest::binary>> = rest
+          {len, rest}
+
+        len ->
+          {len, rest}
       end
 
     case opcode do
@@ -154,12 +161,18 @@ defmodule Librarian.WsServer do
     case Librarian.Json.decode(text) do
       {:ok, map} ->
         case Librarian.ingest(map) do
-          {:ok, bucket} -> send_text(client, Librarian.Json.encode(%{"ok" => true, "bucket" => bucket}))
-          {:error, reason} -> send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => inspect(reason)}))
+          {:ok, bucket} ->
+            send_text(client, Librarian.Json.encode(%{"ok" => true, "bucket" => bucket}))
+
+          {:error, reason} ->
+            send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => inspect(reason)}))
         end
 
       {:error, reason} ->
-        send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => "bad_json: #{inspect(reason)}"}))
+        send_text(
+          client,
+          Librarian.Json.encode(%{"ok" => false, "error" => "bad_json: #{inspect(reason)}"})
+        )
     end
   end
 

@@ -86,8 +86,9 @@ defmodule Librarian.Curator.QwenApi do
   end
 
   defp chat(prompt) do
-    api_key = Application.get_env(:librarian, :dashscope_api_key) ||
-      raise "DASHSCOPE_API_KEY not set — export it or add to runtime.exs"
+    api_key =
+      Application.get_env(:librarian, :dashscope_api_key) ||
+        raise "DASHSCOPE_API_KEY not set — export it or add to runtime.exs"
 
     body = %{
       "model" => @model,
@@ -124,15 +125,17 @@ defmodule Librarian.Curator.QwenApi do
   end
 
   defp parse_result(body) do
-    with content when is_binary(content) <- get_in(body, ["choices", Access.at(0), "message", "content"]),
+    with content when is_binary(content) <-
+           get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-      {:ok, %Librarian.Curator.Result{
-        summary: map["summary"] || "",
-        facts: map["facts"] || [],
-        tags: map["tags"] || [],
-        importance: to_float(map["importance"]),
-        embedding: nil
-      }}
+      {:ok,
+       %Librarian.Curator.Result{
+         summary: map["summary"] || "",
+         facts: map["facts"] || [],
+         tags: map["tags"] || [],
+         importance: to_float(map["importance"]),
+         embedding: nil
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err
@@ -163,14 +166,16 @@ defmodule Librarian.Curator.QwenApi do
   end
 
   defp parse_deep_pass(body) do
-    with content when is_binary(content) <- get_in(body, ["choices", Access.at(0), "message", "content"]),
+    with content when is_binary(content) <-
+           get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-      {:ok, %{
-        supersessions: map["supersessions"] || [],
-        re_scores: map["re_scores"] || [],
-        cross_connections: map["cross_connections"] || [],
-        new_tags: map["new_tags"] || []
-      }}
+      {:ok,
+       %{
+         supersessions: map["supersessions"] || [],
+         re_scores: map["re_scores"] || [],
+         cross_connections: map["cross_connections"] || [],
+         new_tags: map["new_tags"] || []
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

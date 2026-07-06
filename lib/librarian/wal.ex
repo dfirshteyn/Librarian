@@ -136,6 +136,7 @@ defmodule Librarian.Wal do
   end
 
   defp parse_dt(nil), do: DateTime.utc_now()
+
   defp parse_dt(str) do
     case DateTime.from_iso8601(str) do
       {:ok, dt, _} -> dt

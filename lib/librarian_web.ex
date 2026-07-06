@@ -21,6 +21,7 @@ defmodule LibrarianWeb do
       use Phoenix.Controller,
         formats: [:html, :json],
         layouts: [html: LibrarianWeb.Layouts]
+
       import Plug.Conn
     end
   end
@@ -52,6 +53,7 @@ defmodule LibrarianWeb do
       import Phoenix.HTML.Form
       import Phoenix.LiveView.Helpers
       import LibrarianWeb.CoreComponents
+
       use Phoenix.VerifiedRoutes,
         endpoint: LibrarianWeb.Endpoint,
         router: LibrarianWeb.Router,

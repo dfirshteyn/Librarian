@@ -52,10 +52,12 @@ defmodule Librarian.Curator do
 
   def embed(text) do
     {scrubbed, count} = Librarian.LeakGuard.scrub(text)
+
     if count > 0 do
       require Logger
       Logger.warning("LeakGuard: redacted #{count} secret(s) before embedding")
     end
+
     impl().embed(scrubbed)
   end
 
@@ -65,10 +67,15 @@ defmodule Librarian.Curator do
   defp scrub_chunk(chunk) do
     Enum.map(chunk, fn payload ->
       {scrubbed, count} = Librarian.LeakGuard.scrub(payload.raw_text)
+
       if count > 0 do
         require Logger
-        Logger.warning("LeakGuard: redacted #{count} secret(s) from #{payload.source} payload before curator")
+
+        Logger.warning(
+          "LeakGuard: redacted #{count} secret(s) from #{payload.source} payload before curator"
+        )
       end
+
       %{payload | raw_text: scrubbed}
     end)
   end

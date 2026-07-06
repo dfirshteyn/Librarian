@@ -45,13 +45,20 @@ defmodule Librarian.MixProject do
       # Ecto + Postgres
       {:ecto_sql, "~> 3.10"},
       {:postgrex, "~> 0.17"},
+      # SQLite for COLD store
+      {:exqlite, "~> 0.23"},
       # Auth
       {:bcrypt_elixir, "~> 3.0"},
       # Assets
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
-      {:heroicons, github: "tailwindlabs/heroicons", tag: "v2.1.1",
-       sparse: "optimized", app: false, compile: false, depth: 1}
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.1.1",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1}
     ]
   end
 end

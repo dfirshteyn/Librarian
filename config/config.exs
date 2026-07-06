@@ -8,11 +8,12 @@ config :librarian,
     "research" => :supersede,
     "finance" => :supersede
   },
-  default_decay_policy: :decay
+  default_decay_policy: :decay,
+  db_dir: "priv/data",
+  sqlite_vec_path: "/usr/lib/sqlite-vec/vec0.so"
 
 # Ecto repo
-config :librarian, Librarian.Repo,
-  database: "librarian_#{Mix.env()}"
+config :librarian, Librarian.Repo, database: "librarian_#{Mix.env()}"
 
 config :librarian, ecto_repos: [Librarian.Repo]
 

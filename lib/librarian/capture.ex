@@ -62,5 +62,6 @@ defmodule Librarian.Capture do
   """
 
   @callback init(args :: term()) :: {:ok, state :: term()} | {:error, term()}
-  @callback handle_capture(state :: term()) :: {:ok, [Librarian.Capture.Payload.t()], state :: term()}
+  @callback handle_capture(state :: term()) ::
+              {:ok, [Librarian.Capture.Payload.t()], state :: term()}
 end

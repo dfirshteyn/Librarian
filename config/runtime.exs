@@ -2,6 +2,7 @@ import Config
 
 # Load .env file if present (dev convenience — never commit secrets)
 dotenv = Path.join(File.cwd!(), ".env")
+
 if File.exists?(dotenv) do
   dotenv
   |> File.read!()
@@ -20,15 +21,17 @@ if api_key = System.get_env("DASHSCOPE_API_KEY") do
 end
 
 if config_env() == :prod do
-  database_url = System.get_env("DATABASE_URL") ||
-    raise "DATABASE_URL env var is required in prod"
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise "DATABASE_URL env var is required in prod"
 
   config :librarian, Librarian.Repo,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
-  secret_key_base = System.get_env("SECRET_KEY_BASE") ||
-    raise "SECRET_KEY_BASE env var is required in prod"
+  secret_key_base =
+    System.get_env("SECRET_KEY_BASE") ||
+      raise "SECRET_KEY_BASE env var is required in prod"
 
   host = System.get_env("PHX_HOST") || "localhost"
   port = String.to_integer(System.get_env("PORT") || "4000")

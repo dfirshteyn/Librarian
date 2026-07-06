@@ -5,15 +5,23 @@ defmodule Librarian.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      {Registry, keys: :unique, name: Librarian.BucketRegistry},
-      {DynamicSupervisor, strategy: :one_for_one, name: Librarian.BucketSupervisor},
-      Librarian.WarmStore,
-      Librarian.Repo,
-      {Phoenix.PubSub, name: Librarian.PubSub},
-      LibrarianWeb.Endpoint
-    ]
-    |> maybe_add_ws_server()
+    children =
+      [
+        {Registry, keys: :unique, name: Librarian.BucketRegistry},
+        {DynamicSupervisor, strategy: :one_for_one, name: Librarian.BucketSupervisor},
+        {DynamicSupervisor,
+         strategy: :one_for_one, name: Librarian.ColdStore.ConnectionSupervisor},
+        Librarian.WarmStore,
+        Librarian.Repo,
+        {Task.Supervisor, name: Librarian.TaskSupervisor},
+        {Phoenix.PubSub, name: Librarian.PubSub},
+        Librarian.Consolidation.AutomationServer,
+        LibrarianWeb.Endpoint
+      ]
+      |> maybe_add_ws_server()
+
+    # ETS table must exist before any ColdStore connection is requested
+    Librarian.ColdStore.ConnectionManager.init_table()
 
     opts = [strategy: :one_for_one, name: Librarian.Supervisor]
 
@@ -22,6 +30,7 @@ defmodule Librarian.Application do
         recover_pending_wals()
         recover_warm_snapshot()
         {:ok, sup}
+
       error ->
         error
     end
@@ -32,7 +41,11 @@ defmodule Librarian.Application do
 
     if pending != [] do
       require Logger
-      Logger.info("Librarian: replaying WAL for #{length(pending)} bucket(s): #{Enum.join(pending, ", ")}")
+
+      Logger.info(
+        "Librarian: replaying WAL for #{length(pending)} bucket(s): #{Enum.join(pending, ", ")}"
+      )
+
       Enum.each(pending, &Librarian.HotStore.ensure_started/1)
     end
   end

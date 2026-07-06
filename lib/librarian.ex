@@ -27,7 +27,13 @@ defmodule Librarian do
     payload = %{payload | hint_tags: Enum.uniq(payload.hint_tags ++ tags)}
     HotStore.put(bucket, payload)
     preview = String.slice(payload.raw_text, 0, 80)
-    Phoenix.PubSub.broadcast(Librarian.PubSub, "ingest", {:ingested, bucket, payload.source, preview, user_id})
+
+    Phoenix.PubSub.broadcast(
+      Librarian.PubSub,
+      "ingest",
+      {:ingested, bucket, payload.source, preview, user_id}
+    )
+
     {:ok, bucket}
   end
 
@@ -38,11 +44,29 @@ defmodule Librarian do
 
     related =
       case warm do
-        [top | _] -> WarmStore.related_by_tag(top.tags, exclude_id: top.id, other_bucket_only: top.bucket, user_id: user_id)
-        [] -> []
+        [top | _] ->
+          WarmStore.related_by_tag(top.tags,
+            exclude_id: top.id,
+            other_bucket_only: top.bucket,
+            user_id: user_id
+          )
+
+        [] ->
+          []
       end
 
-    cold = if warm == [], do: Librarian.ColdStore.search(query), else: []
+    cold =
+      if length(warm) < 3 do
+        case Librarian.Curator.embed(query) do
+          {:ok, embedding} ->
+            Librarian.ColdStore.search_hybrid(query, embedding, user_id, 5)
+
+          _ ->
+            Librarian.ColdStore.search_fts(query, user_id)
+        end
+      else
+        []
+      end
 
     %{warm: warm, related: related, cold: cold}
   end
@@ -56,12 +80,16 @@ defmodule Librarian do
 
   defp do_forget(query, user_id) do
     WarmStore.recall(query, user_id)
-    |> Enum.map(fn m -> WarmStore.forget(m.id); m.id end)
+    |> Enum.map(fn m ->
+      WarmStore.forget(m.id)
+      m.id
+    end)
   end
 
   def status(user_id \\ @default_user) do
     prefix = user_id <> ":"
     buckets = HotStore.buckets() |> Enum.filter(&String.starts_with?(&1, prefix))
+
     %{
       user_id: user_id,
       hot: Map.new(buckets, fn b -> {b, HotStore.count(b)} end),

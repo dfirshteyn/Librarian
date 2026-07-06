@@ -142,15 +142,17 @@ defmodule Librarian.Curator.LlamaCpp do
   end
 
   defp parse_result(body) do
-    with content when is_binary(content) <- get_in(body, ["choices", Access.at(0), "message", "content"]),
+    with content when is_binary(content) <-
+           get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-      {:ok, %Librarian.Curator.Result{
-        summary: map["summary"] || "",
-        facts: map["facts"] || [],
-        tags: map["tags"] || [],
-        importance: to_float(map["importance"]),
-        embedding: nil
-      }}
+      {:ok,
+       %Librarian.Curator.Result{
+         summary: map["summary"] || "",
+         facts: map["facts"] || [],
+         tags: map["tags"] || [],
+         importance: to_float(map["importance"]),
+         embedding: nil
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

@@ -32,11 +32,13 @@ defmodule Librarian.LeakGuard do
     # Database connection URLs
     {:db_url, ~r/((?:postgres|mysql|mongodb|redis|sqlite):\/\/[^\s"'<>\]]+)/i},
     # Private key blocks (PEM format)
-    {:private_key, ~r/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/s},
+    {:private_key,
+     ~r/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/s},
     # GitHub personal access tokens
     {:github_token, ~r/\b(gh[pousr]_[A-Za-z0-9]{36,})\b/},
     # Generic password= / token= / secret= / api_key= assignments in env/config
-    {:env_secret, ~r/\b(password|token|secret|api_key|apikey|auth_token)\s*[=:]\s*["']?([^\s"'<>\n]{8,})["']?/i}
+    {:env_secret,
+     ~r/\b(password|token|secret|api_key|apikey|auth_token)\s*[=:]\s*["']?([^\s"'<>\n]{8,})["']?/i}
   ]
 
   @doc """

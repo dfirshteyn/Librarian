@@ -39,7 +39,15 @@ defmodule Librarian.WarmStore do
 
   @impl true
   def init(:ok) do
+    # Trap exits so terminate/2 fires when the Supervisor shuts us down
+    # (SIGTERM, `mix release stop`, normal supervisor shutdown — not SIGKILL)
+    Process.flag(:trap_exit, true)
+
     table = :ets.new(@table, [:set, :named_table, :public])
+
+    # Auto-snapshot every 5 minutes to bound data loss from hard crashes
+    Process.send_after(self(), :auto_snapshot, 5 * 60 * 1_000)
+
     {:ok, %{table: table, next_id: 1}}
   end
 
@@ -58,6 +66,17 @@ defmodule Librarian.WarmStore do
 
   def all do
     :ets.tab2list(@table) |> Enum.map(fn {_id, m} -> m end)
+  end
+
+  @doc """
+  Return all active (non-superseded) memories for a given user.
+  """
+  def all_for_user(user_id) do
+    prefix = user_id <> ":"
+
+    all()
+    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+    |> Enum.reject(& &1.superseded_by)
   end
 
   def by_bucket(bucket) do
@@ -82,7 +101,9 @@ defmodule Librarian.WarmStore do
     |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
     |> Enum.filter(fn m -> is_nil(exclude_id) or m.id != exclude_id end)
     |> Enum.filter(fn m -> is_nil(bucket_filter) or m.bucket != bucket_filter end)
-    |> Enum.filter(fn m -> MapSet.intersection(MapSet.new(m.tags), tagset) |> MapSet.size() > 0 end)
+    |> Enum.filter(fn m ->
+      MapSet.intersection(MapSet.new(m.tags), tagset) |> MapSet.size() > 0
+    end)
   end
 
   @doc """
@@ -132,17 +153,23 @@ defmodule Librarian.WarmStore do
       end)
 
     # 3. Rank each category independently (descending)
-    keyword_ranked = scored |> Enum.sort_by(fn {_m, ks, _vs, _imp} -> -ks end) |> Enum.with_index(1)
-    vector_ranked  = scored |> Enum.sort_by(fn {_m, _ks, vs, _imp} -> -(vs || 0.0) end) |> Enum.with_index(1)
-    import_ranked  = scored |> Enum.sort_by(fn {_m, _ks, _vs, imp} -> -imp end) |> Enum.with_index(1)
+    keyword_ranked =
+      scored |> Enum.sort_by(fn {_m, ks, _vs, _imp} -> -ks end) |> Enum.with_index(1)
+
+    vector_ranked =
+      scored |> Enum.sort_by(fn {_m, _ks, vs, _imp} -> -(vs || 0.0) end) |> Enum.with_index(1)
+
+    import_ranked =
+      scored |> Enum.sort_by(fn {_m, _ks, _vs, imp} -> -imp end) |> Enum.with_index(1)
 
     # 4. Build instant rank lookups by memory id
     keyword_ranks = Map.new(keyword_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
-    vector_ranks  = Map.new(vector_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
-    import_ranks  = Map.new(import_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
+    vector_ranks = Map.new(vector_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
+    import_ranks = Map.new(import_ranked, fn {{m, _, _, _}, rank} -> {m.id, rank} end)
 
     # 5. Execute 3-way RRF fusion
     k = 60
+
     scored
     |> Enum.map(fn {m, ks, vs, _imp} ->
       kr = Map.get(keyword_ranks, m.id)
@@ -164,9 +191,15 @@ defmodule Librarian.WarmStore do
   # summary, facts, and tags. Simple but effective — BM25 is overkill for
   # per-tenant ETS tables with < 2,000 entries.
   defp keyword_score(_memory, []), do: 0
+
   defp keyword_score(memory, query_tokens) do
-    text = String.downcase("#{memory.summary || ""} #{Enum.join(memory.facts || [], " ")} #{Enum.join(memory.tags || [], " ")}")
+    text =
+      String.downcase(
+        "#{memory.summary || ""} #{Enum.join(memory.facts || [], " ")} #{Enum.join(memory.tags || [], " ")}"
+      )
+
     words = String.split(text)
+
     Enum.reduce(query_tokens, 0, fn token, acc ->
       acc + Enum.count(words, &(&1 == token))
     end)
@@ -194,6 +227,7 @@ defmodule Librarian.WarmStore do
     norm_b = :math.sqrt(Enum.reduce(b, 0.0, fn x, acc -> acc + x * x end))
     dot / (norm_a * norm_b + 1.0e-8)
   end
+
   defp cosine_similarity(_, _), do: 0.0
 
   def forget(id) do
@@ -247,33 +281,32 @@ defmodule Librarian.WarmStore do
     path = snapshot_path()
     File.mkdir_p!(Path.dirname(path))
 
-    all()
-    |> Enum.map(fn m ->
-      %{
-        id: m.id,
-        bucket: m.bucket,
-        summary: m.summary,
-        facts: m.facts,
-        tags: m.tags,
-        embedding: m.embedding,
-        importance: m.importance,
-        created_at: DateTime.to_iso8601(m.created_at),
-        last_accessed_at: DateTime.to_iso8601(m.last_accessed_at),
-        superseded_by: m.superseded_by,
-        access_count: m.access_count
-      }
-    end)
-    |> Enum.each(fn map ->
-      File.write!(path, Librarian.Json.encode(map) <> "\n", [:append])
-    end)
+    lines =
+      all()
+      |> Enum.map(fn m ->
+        Librarian.Json.encode(%{
+          id: m.id,
+          bucket: m.bucket,
+          summary: m.summary,
+          facts: m.facts,
+          tags: m.tags,
+          embedding: m.embedding,
+          importance: m.importance,
+          created_at: DateTime.to_iso8601(m.created_at),
+          last_accessed_at: DateTime.to_iso8601(m.last_accessed_at),
+          superseded_by: m.superseded_by,
+          access_count: m.access_count
+        }) <> "\n"
+      end)
+      |> IO.iodata_to_binary()
 
+    File.write!(path, lines)
     :ok
   end
 
   @doc """
   Load WARM memories from a JSONL snapshot file on disk.
   Called on startup to restore memories from the last shutdown.
-  Deletes the file after loading so fresh restarts start clean.
   """
   def load do
     path = snapshot_path()
@@ -311,7 +344,6 @@ defmodule Librarian.WarmStore do
         end
       end)
 
-      File.rm!(path)
       :loaded
     else
       :no_snapshot
@@ -323,6 +355,7 @@ defmodule Librarian.WarmStore do
   end
 
   defp parse_datetime(nil), do: DateTime.utc_now()
+
   defp parse_datetime(iso) when is_binary(iso) do
     case DateTime.from_iso8601(iso) do
       {:ok, dt, _} -> dt
@@ -330,11 +363,19 @@ defmodule Librarian.WarmStore do
     end
   end
 
-  # --- GenServer ---
+  # ── GenServer ────────────────────────────────────────────────────────
+
+  @impl true
+  def handle_info(:auto_snapshot, state) do
+    dump()
+    Process.send_after(self(), :auto_snapshot, 5 * 60 * 1_000)
+    {:noreply, state}
+  end
 
   @impl true
   def terminate(_reason, _state) do
     dump()
+    :ok
   end
 
   @impl true
@@ -361,12 +402,14 @@ defmodule Librarian.WarmStore do
     }
 
     :ets.insert(table, {id, memory})
+    dump()
     {:reply, memory, %{state | next_id: id + 1}}
   end
 
   @impl true
   def handle_call({:forget, id}, _from, %{table: table} = state) do
     :ets.delete(table, id)
+    dump()
     {:reply, :ok, state}
   end
 
@@ -396,6 +439,7 @@ defmodule Librarian.WarmStore do
       :ets.insert(table, {id, updated})
     end)
 
+    dump()
     {:reply, :ok, state}
   end
 
@@ -405,6 +449,7 @@ defmodule Librarian.WarmStore do
       [{^old_id, old_memory}] ->
         updated = %{old_memory | superseded_by: new_id, importance: 0.05}
         :ets.insert(table, {old_id, updated})
+        dump()
         {:reply, :ok, state}
 
       [] ->
@@ -416,9 +461,12 @@ defmodule Librarian.WarmStore do
     policies = Application.get_env(:librarian, :decay_policies, %{})
     # bucket is "user_id:bucket_name" — check full key first, then bare name
     bare = bucket |> String.split(":") |> List.last()
-    Map.get(policies, bucket,
-      Map.get(policies, bare,
-        Application.get_env(:librarian, :default_decay_policy, :decay)))
+
+    Map.get(
+      policies,
+      bucket,
+      Map.get(policies, bare, Application.get_env(:librarian, :default_decay_policy, :decay))
+    )
   end
 
   defp bump_access(memory) do
@@ -429,6 +477,7 @@ defmodule Librarian.WarmStore do
     }
 
     :ets.insert(@table, {memory.id, updated})
+    dump()
     updated
   end
 end

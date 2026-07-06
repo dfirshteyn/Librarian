@@ -44,6 +44,7 @@ defmodule Librarian.McpServer do
     IO.stream(:stdio, :line)
     |> Enum.each(fn line ->
       line = String.trim(line)
+
       if line != "" do
         case Librarian.Json.decode(line) do
           {:ok, msg} -> handle_message(msg)
@@ -73,26 +74,45 @@ defmodule Librarian.McpServer do
     tools = [
       %{
         "name" => "ingest",
-        "description" => "Save text into the Librarian memory store. Use this to remember facts, decisions, preferences, or any information the user wants persisted across sessions.",
+        "description" =>
+          "Save text into the Librarian memory store. Use this to remember facts, decisions, preferences, or any information the user wants persisted across sessions.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "text" => %{"type" => "string", "description" => "The text content to remember"},
-            "source" => %{"type" => "string", "description" => "Source identifier (e.g., 'claude', 'chat', 'note')", "default" => "mcp"},
-            "tags" => %{"type" => "array", "items" => %{"type" => "string"}, "description" => "Optional hint tags for classification", "default" => []},
-            "user_id" => %{"type" => "string", "description" => "User/agent identifier for multi-tenant isolation", "default" => "local"}
+            "source" => %{
+              "type" => "string",
+              "description" => "Source identifier (e.g., 'claude', 'chat', 'note')",
+              "default" => "mcp"
+            },
+            "tags" => %{
+              "type" => "array",
+              "items" => %{"type" => "string"},
+              "description" => "Optional hint tags for classification",
+              "default" => []
+            },
+            "user_id" => %{
+              "type" => "string",
+              "description" => "User/agent identifier for multi-tenant isolation",
+              "default" => "local"
+            }
           },
           "required" => ["text"]
         }
       },
       %{
         "name" => "recall",
-        "description" => "Search memories by query. Returns ranked results with cosine similarity + importance scoring, plus cross-bucket synaptic jumps (connections to related memories in different categories).",
+        "description" =>
+          "Search memories by query. Returns ranked results with cosine similarity + importance scoring, plus cross-bucket synaptic jumps (connections to related memories in different categories).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "query" => %{"type" => "string", "description" => "Search query"},
-            "user_id" => %{"type" => "string", "description" => "User/agent identifier", "default" => "local"}
+            "user_id" => %{
+              "type" => "string",
+              "description" => "User/agent identifier",
+              "default" => "local"
+            }
           },
           "required" => ["query"]
         }
@@ -103,45 +123,65 @@ defmodule Librarian.McpServer do
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
-            "user_id" => %{"type" => "string", "description" => "User/agent identifier", "default" => "local"}
+            "user_id" => %{
+              "type" => "string",
+              "description" => "User/agent identifier",
+              "default" => "local"
+            }
           }
         }
       },
       %{
         "name" => "forget",
-        "description" => "Remove memories matching a query. Use with caution — this permanently deletes from WARM.",
+        "description" =>
+          "Remove memories matching a query. Use with caution — this permanently deletes from WARM.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "query" => %{"type" => "string", "description" => "Query to find memories to forget"},
-            "user_id" => %{"type" => "string", "description" => "User/agent identifier", "default" => "local"}
+            "user_id" => %{
+              "type" => "string",
+              "description" => "User/agent identifier",
+              "default" => "local"
+            }
           },
           "required" => ["query"]
         }
       },
       %{
         "name" => "flush",
-        "description" => "Manually drain HOT buffers to WARM tier through the curator. Converts raw capture text into structured memories (summary, facts, tags, importance score).",
+        "description" =>
+          "Manually drain HOT buffers to WARM tier through the curator. Converts raw capture text into structured memories (summary, facts, tags, importance score).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
-            "bucket" => %{"type" => "string", "description" => "Specific bucket to flush, or 'all' for all buckets", "default" => "all"}
+            "bucket" => %{
+              "type" => "string",
+              "description" => "Specific bucket to flush, or 'all' for all buckets",
+              "default" => "all"
+            }
           }
         }
       },
       %{
         "name" => "briefing",
-        "description" => "Get the morning briefing — recent cross-bucket insights and supersessions logged during the last curator pass.",
+        "description" =>
+          "Get the morning briefing — recent cross-bucket insights and supersessions logged during the last curator pass.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
-            "limit" => %{"type" => "number", "description" => "Number of recent insights to return", "default" => 5}
+            "limit" => %{
+              "type" => "number",
+              "description" => "Number of recent insights to return",
+              "default" => 5
+            }
           }
         }
       },
       %{
         "name" => "nightly_pass",
-        "description" => "Trigger the full nightly curation cycle: decay, archive stale memories, and run Qwen deep reasoning pass (when Hybrid curator is configured).",
+        "description" =>
+          "Trigger the full nightly curation cycle: decay, archive stale memories, and run Qwen deep reasoning pass (when Hybrid curator is configured).",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{}
@@ -152,7 +192,11 @@ defmodule Librarian.McpServer do
     write_response(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => tools}})
   end
 
-  defp handle_message(%{"method" => "tools/call", "id" => id, "params" => %{"name" => name, "arguments" => args}}) do
+  defp handle_message(%{
+         "method" => "tools/call",
+         "id" => id,
+         "params" => %{"name" => name, "arguments" => args}
+       }) do
     result = call_tool(name, args || %{})
     write_response(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
   end

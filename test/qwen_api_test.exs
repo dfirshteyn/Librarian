@@ -8,12 +8,13 @@ defmodule Librarian.Curator.QwenApiTest do
 
   describe "parse_result/1 (via summarize with mocked HTTP)" do
     test "parses a well-formed Qwen response into a Result struct" do
-      result = call_parse_result(%{
-        "summary" => "switched db to sqlite",
-        "facts" => ["team chose sqlite over postgres"],
-        "tags" => ["sqlite", "database", "decision"],
-        "importance" => 0.8
-      })
+      result =
+        call_parse_result(%{
+          "summary" => "switched db to sqlite",
+          "facts" => ["team chose sqlite over postgres"],
+          "tags" => ["sqlite", "database", "decision"],
+          "importance" => 0.8
+        })
 
       assert result.summary == "switched db to sqlite"
       assert result.facts == ["team chose sqlite over postgres"]
@@ -93,16 +94,18 @@ defmodule Librarian.Curator.QwenApiTest do
   # --- helpers ---
 
   defp respond_ok(conn, summary) do
-    content = Jason.encode!(%{
-      "summary" => summary,
-      "facts" => ["fact one"],
-      "tags" => ["tag1", "tag2"],
-      "importance" => 0.7
-    })
+    content =
+      Jason.encode!(%{
+        "summary" => summary,
+        "facts" => ["fact one"],
+        "tags" => ["tag1", "tag2"],
+        "importance" => 0.7
+      })
 
-    body = Jason.encode!(%{
-      "choices" => [%{"message" => %{"role" => "assistant", "content" => content}}]
-    })
+    body =
+      Jason.encode!(%{
+        "choices" => [%{"message" => %{"role" => "assistant", "content" => content}}]
+      })
 
     conn
     |> Plug.Conn.put_resp_content_type("application/json")
@@ -112,9 +115,11 @@ defmodule Librarian.Curator.QwenApiTest do
   defp call_parse_result(map) do
     plug = fn conn ->
       content = Jason.encode!(map)
-      body = Jason.encode!(%{
-        "choices" => [%{"message" => %{"role" => "assistant", "content" => content}}]
-      })
+
+      body =
+        Jason.encode!(%{
+          "choices" => [%{"message" => %{"role" => "assistant", "content" => content}}]
+        })
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
