@@ -119,7 +119,8 @@ defmodule LibrarianWeb.DashboardLive do
         memories
         |> Enum.map(fn m ->
           # Estimate original raw text length from summary + facts (conservative)
-          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " "))) |> div(4)
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")))
+          |> div(4)
         end)
         |> Enum.sum()
 

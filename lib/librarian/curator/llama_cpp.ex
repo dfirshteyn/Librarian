@@ -83,13 +83,18 @@ defmodule Librarian.Curator.LlamaCpp do
 
   defp build_prompt(text) do
     """
-    You are a memory curator. Analyze the following captured notes and return a JSON object with exactly these keys:
-    - "summary": a single concise sentence distilling the core idea
-    - "facts": a JSON array of short atomic fact strings (max 5)
-    - "tags": a JSON array of 3-6 lowercase keyword strings for associative linking
-    - "importance": a float 0.0-1.0 reflecting how decision-critical this is
+    You are a memory extraction system. Extract information from user text and return ONLY a JSON object with no markdown formatting, no code blocks, no backticks, no explanation.
 
-    Respond with ONLY the JSON object, no markdown, no explanation.
+    Return exactly this structure filled with real extracted values:
+    {"summary":"one sentence","facts":["fact1","fact2"],"tags":["tag1","tag2","tag3"],"importance":0.7,"bucket":"project"}
+
+    Rules:
+    - summary: one sentence capturing the core decision or observation
+    - facts: 3-5 atomic factual statements as complete sentences
+    - tags: 3-6 specific keywords, lowercase, no spaces
+    - importance: float 0.0-1.0, decisions=0.7+, observations=0.5, casual=0.2
+    - bucket: one of "project", "research", "ideas", "thoughts", "finance", "inbox" — the single best semantic bucket; "inbox" only if none fit
+    - NO markdown, NO backticks, NO code fences, output raw JSON only
 
     Notes:
     #{text}
@@ -145,14 +150,15 @@ defmodule Librarian.Curator.LlamaCpp do
     with content when is_binary(content) <-
            get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-      {:ok,
-       %Librarian.Curator.Result{
-         summary: map["summary"] || "",
-         facts: map["facts"] || [],
-         tags: map["tags"] || [],
-         importance: to_float(map["importance"]),
-         embedding: nil
-       }}
+        {:ok,
+         %Librarian.Curator.Result{
+           summary: map["summary"] || "",
+           facts: map["facts"] || [],
+           tags: map["tags"] || [],
+           importance: to_float(map["importance"]),
+           bucket: Librarian.Router.normalize_bucket(map["bucket"]),
+           embedding: nil
+         }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

@@ -5,7 +5,7 @@ defmodule Librarian.MixProject do
     [
       app: :librarian,
       version: "0.1.0",
-      elixir: "~> 1.14",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       listeners: [Phoenix.CodeReloader],
       aliases: aliases(),
@@ -15,7 +15,7 @@ defmodule Librarian.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :crypto],
+      extra_applications: [:logger, :crypto, :inets, :ssl, :public_key],
       mod: {Librarian.Application, []}
     ]
   end
@@ -23,9 +23,6 @@ defmodule Librarian.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
-      "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind librarian", "esbuild librarian"]
     ]
@@ -42,13 +39,13 @@ defmodule Librarian.MixProject do
       {:phoenix_html, "~> 4.0"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:bandit, "~> 1.0"},
-      # Ecto + Postgres
-      {:ecto_sql, "~> 3.10"},
-      {:postgrex, "~> 0.17"},
       # SQLite for COLD store
       {:exqlite, "~> 0.23"},
-      # Auth
-      {:bcrypt_elixir, "~> 3.0"},
+      {:ecto_sqlite3, "~> 0.17"},
+      # ML
+      {:nx, "~> 0.12.0"},
+      {:exla, "~> 0.12.0"},
+      {:bumblebee, "~> 0.7.0"},
       # Assets
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
@@ -58,7 +55,8 @@ defmodule Librarian.MixProject do
        sparse: "optimized",
        app: false,
        compile: false,
-       depth: 1}
+       depth: 1},
+      {:glazer, "~> 0.5"}
     ]
   end
 end

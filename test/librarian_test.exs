@@ -31,10 +31,11 @@ defmodule Librarian.RouterTest do
   use ExUnit.Case, async: true
   alias Librarian.{Router, Capture.Payload}
 
-  test "routes project-flavored text to the project bucket" do
+  # Ingest-time routing is just namespacing: everything lands in inbox.
+  # Semantic classification is deferred to the curator at flush time.
+  test "route/2 assigns every payload to the per-user inbox buffer" do
     payload = %Payload{source: "test", raw_text: "we need to fix the deploy script for this repo"}
-    assert {"local:project", tags} = Router.route(payload)
-    assert "deploy" in tags
+    assert {"local:inbox", _tags} = Router.route(payload)
   end
 
   test "routes uncategorized text to inbox without blocking" do
@@ -45,6 +46,25 @@ defmodule Librarian.RouterTest do
   test "hint_tags carry through even when no keyword rule fires" do
     payload = %Payload{source: "test", raw_text: "nothing matches", hint_tags: ["custom"]}
     assert {"local:inbox", ["custom"]} = Router.route(payload)
+  end
+
+  # The keyword classifier is still the deterministic fallback used by the
+  # Stub curator (tests). It must use word-boundary matching.
+  test "classify_bucket picks the best keyword bucket, defaulting to inbox" do
+    assert "project" = Router.classify_bucket("we decided to deploy the new router for this repo")
+    assert "research" = Router.classify_bucket("ebbinghaus forgetting curve and spaced retrieval")
+    assert "finance" = Router.classify_bucket("alibaba cloud billing and token spend")
+    assert "inbox" = Router.classify_bucket("the weather today was nice and sunny")
+  end
+
+  test "classify_bucket word-boundary match: 'we' does not match inside 'weather'" do
+    assert "inbox" = Router.classify_bucket("the weather was wet")
+  end
+
+  test "normalize_bucket rejects unknown buckets and falls back to inbox" do
+    assert "project" = Router.normalize_bucket("project")
+    assert "inbox" = Router.normalize_bucket("nonsense")
+    assert "inbox" = Router.normalize_bucket(nil)
   end
 end
 
@@ -92,6 +112,9 @@ end
 defmodule LibrarianPipelineTest do
   use ExUnit.Case, async: false
 
+  # Under Option B all HOT payloads land in the per-user inbox buffer. The
+  # semantic bucket is decided by the curator at flush time and written to
+  # WARM, so recall/forget must target that WARM bucket (here "local:project").
   test "ingest -> flush -> recall -> forget round trip" do
     {:ok, bucket} =
       Librarian.ingest(%{
@@ -99,12 +122,14 @@ defmodule LibrarianPipelineTest do
         "raw_text" => "we decided to deploy the new router today, fixing the bucket bug"
       })
 
-    assert bucket == "local:project"
-    assert Librarian.HotStore.count("local:project") >= 1
+    # Ingest now namespaces to inbox; the semantic bucket is decided at flush.
+    assert bucket == "local:inbox"
+    assert Librarian.HotStore.count("local:inbox") >= 1
 
-    assert {:ok, memory} = Librarian.Flusher.flush_bucket("local:project")
+    assert {:ok, [memory]} = Librarian.Flusher.flush_bucket("local:inbox")
+    # Stub classifies the deploy/repo text as "project" — curator wins.
     assert memory.bucket == "local:project"
-    assert Librarian.HotStore.count("local:project") == 0
+    assert Librarian.HotStore.count("local:inbox") == 0
 
     %{warm: warm} = Librarian.recall("deploy")
     assert Enum.any?(warm, &(&1.id == memory.id))
@@ -114,16 +139,45 @@ defmodule LibrarianPipelineTest do
     refute Enum.any?(warm_after, &(&1.id == memory.id))
   end
 
-  test "a crash in one bucket's process does not affect another bucket" do
-    Librarian.ingest(%{"source" => "test", "raw_text" => "research benchmark paper notes"})
-    [{pid, _}] = Registry.lookup(Librarian.BucketRegistry, "local:research")
+  test "crash isolation: killing one bucket's process doesn't affect other buckets" do
+    # Kill the "local:inbox" process and verify other buckets still work
+    original_hot = Librarian.HotStore.buckets()
 
-    Librarian.ingest(%{"source" => "test", "raw_text" => "totally unrelated brainstorm idea"})
+    # Create a new bucket by ingesting to it
+    test_user = "crash_test_#{:erlang.unique_integer([:positive])}"
+    test_inbox = "#{test_user}:inbox"
+    Librarian.ingest(%{"source" => "test", "raw_text" => "isolated bucket test"}, test_user)
 
-    Process.exit(pid, :kill)
-    Process.sleep(50)
+    # Get the pid for local:inbox and kill it
+    [{local_pid, _} | _] = Registry.lookup(Librarian.BucketRegistry, "local:inbox")
+    Process.exit(local_pid, :kill)
+    Process.sleep(100)
 
-    assert Librarian.HotStore.count("local:ideas") >= 1
+    # The test user's bucket should still be alive and operational
+    [{test_pid, _}] = Registry.lookup(Librarian.BucketRegistry, test_inbox)
+    assert is_pid(test_pid)
+
+    # Can still ingest to the isolated bucket
+    Librarian.ingest(%{"source" => "test", "raw_text" => "still works"}, test_user)
+    assert Librarian.HotStore.count(test_inbox) >= 2
+
+    on_exit(fn ->
+      Librarian.HotStore.drain(test_inbox)
+      Path.wildcard("priv/wal/#{test_user}*.wal") |> Enum.each(&File.rm!/1)
+    end)
+  end
+
+  setup do
+    # Isolate from any other module that wrote to the shared local:inbox HOT
+    # buffer (e.g. IngestRouterTest leftovers) before we flush it ourselves.
+    Librarian.HotStore.drain("local:inbox")
+    Librarian.Wal.truncate("local:inbox")
+
+    on_exit(fn ->
+      Enum.each(Librarian.WarmStore.all(), &Librarian.WarmStore.forget(&1.id))
+    end)
+
+    :ok
   end
 end
 
@@ -239,29 +293,41 @@ defmodule Librarian.FlusherSupersessionTest do
   use ExUnit.Case, async: false
 
   setup do
+    # Isolate from any other module that wrote to the shared local:inbox HOT
+    # buffer before we flush it ourselves.
+    Librarian.HotStore.drain("local:inbox")
+    Librarian.Wal.truncate("local:inbox")
+
     on_exit(fn ->
       Enum.each(Librarian.WarmStore.all(), &Librarian.WarmStore.forget(&1.id))
     end)
 
+    # "project" => :supersede. After Option B the curator assigns the WARM
+    # bucket ("local:project") at flush time; maybe_supersede checks the
+    # WARM bucket name, so it correctly applies the :supersede policy.
     Application.put_env(:librarian, :decay_policies, %{"project" => :supersede})
     :ok
   end
 
   test "flushing a contradicting decision in a :supersede bucket auto-supersedes the prior one" do
+    # Ingest lands in local:inbox (HOT buffer); flush routes to curator bucket.
     Librarian.ingest(%{
       "source" => "test",
       "raw_text" => "we decided to deploy using the postgres database for the project"
     })
 
-    {:ok, first} = Librarian.Flusher.flush_bucket("local:project")
+    {:ok, [first]} = Librarian.Flusher.flush_bucket("local:inbox")
 
     Librarian.ingest(%{
       "source" => "test",
       "raw_text" => "we decided to deploy using the sqlite database for the project"
     })
 
-    {:ok, second} = Librarian.Flusher.flush_bucket("local:project")
+    {:ok, [second]} = Librarian.Flusher.flush_bucket("local:inbox")
 
+    # Both land in the curator-chosen project WARM bucket and supersede.
+    assert first.bucket == "local:project"
+    assert second.bucket == "local:project"
     reloaded_first = Librarian.WarmStore.all() |> Enum.find(&(&1.id == first.id))
     assert reloaded_first.superseded_by == second.id
   end

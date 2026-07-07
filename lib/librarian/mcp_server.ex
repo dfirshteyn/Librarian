@@ -220,13 +220,22 @@ defmodule Librarian.McpServer do
     tags = args["tags"] || []
     user_id = args["user_id"] || "local"
 
-    case Librarian.ingest(%{"source" => source, "raw_text" => text, "hint_tags" => tags}, user_id) do
+    case Librarian.IngestRouter.process(%{"source" => source, "raw_text" => text, "hint_tags" => tags}, user_id) do
       {:ok, bucket} ->
         tool_result(%{
           "ok" => true,
           "bucket" => bucket,
           "user_id" => user_id,
           "note" => "Saved to #{bucket}. Flush to curate into structured memory."
+        })
+
+      {:ok, bucket, chunk_count} ->
+        tool_result(%{
+          "ok" => true,
+          "bucket" => bucket,
+          "user_id" => user_id,
+          "chunk_count" => chunk_count,
+          "note" => "Saved to #{bucket} in #{chunk_count} chunks. Flush to curate into structured memory."
         })
 
       {:error, reason} ->

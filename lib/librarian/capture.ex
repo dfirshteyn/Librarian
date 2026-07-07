@@ -11,7 +11,11 @@ defmodule Librarian.Capture.Payload do
     :raw_text,
     :occurred_at,
     hint_tags: [],
-    metadata: %{}
+    metadata: %{},
+    file_type: nil,
+    original_filename: nil,
+    parent_id: nil,
+    chunk_index: nil
   ]
 
   @type t :: %__MODULE__{
@@ -19,7 +23,11 @@ defmodule Librarian.Capture.Payload do
           raw_text: String.t(),
           occurred_at: DateTime.t() | nil,
           hint_tags: [String.t()],
-          metadata: map()
+          metadata: map(),
+          file_type: String.t() | nil,
+          original_filename: String.t() | nil,
+          parent_id: String.t() | nil,
+          chunk_index: non_neg_integer() | nil
         }
 
   @doc """
@@ -32,7 +40,11 @@ defmodule Librarian.Capture.Payload do
       raw_text: raw_text,
       occurred_at: parse_time(map["occurred_at"]) || DateTime.utc_now(),
       hint_tags: map["hint_tags"] || [],
-      metadata: map["metadata"] || %{}
+      metadata: map["metadata"] || %{},
+      file_type: map["file_type"],
+      original_filename: map["original_filename"],
+      parent_id: map["parent_id"],
+      chunk_index: map["chunk_index"]
     }
   end
 

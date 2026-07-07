@@ -9,13 +9,37 @@ defmodule LibrarianWeb.ApiController do
   This is the universal capture endpoint. Anything that can make an HTTP
   POST can feed the Librarian — shell scripts, Zapier, n8n, mobile apps,
   other languages. Same payload shape as the WebSocket and iex API.
+
+  Supports:
+    - Regular JSON text ingestion
+    - File uploads via multipart/form-data (with `file` field)
+    - Auto-chunking of large documents
+    - File type detection via extension
   """
   def ingest(conn, params) do
     user_id = get_user_id(conn)
 
-    case Librarian.ingest(params, user_id) do
+    # Handle multipart file uploads
+    params =
+      if conn.private[:phoenix_format] == "multipart" ||
+         conn.path_info == ["api", "ingest"] && has_multipart?(conn) do
+        extract_file_from_multipart(conn, params)
+      else
+        params
+      end
+
+    case Librarian.IngestRouter.process(params, user_id) do
       {:ok, bucket} ->
         json(conn, %{ok: true, bucket: bucket, user_id: user_id})
+
+      {:ok, bucket, chunk_count} ->
+        json(conn, %{
+          ok: true,
+          bucket: bucket,
+          user_id: user_id,
+          chunk_count: chunk_count,
+          note: "Document auto-chunked into #{chunk_count} pieces"
+        })
 
       {:error, reason} ->
         conn
@@ -96,5 +120,37 @@ defmodule LibrarianWeb.ApiController do
       has_embedding: not is_nil(m.embedding),
       created_at: DateTime.to_iso8601(m.created_at)
     }
+  end
+
+  # Multipart file handling
+
+  defp has_multipart?(conn) do
+    # Check content-type header for multipart
+    case get_req_header(conn, "content-type") do
+      [ct | _] -> String.contains?(ct, "multipart/form-data")
+      _ -> false
+    end
+  end
+
+  defp extract_file_from_multipart(conn, params) do
+    # For now, just add the file info to params
+    # Full multipart parsing would require Plug.Parsers config
+    # This is a simplified version that works with pre-parsed multipart data
+    case conn.params["file"] do
+      %Plug.Upload{} = upload ->
+        file_content = File.read!(upload.path)
+
+        # Add file info to params
+        params
+        |> Map.put("raw_text", file_content)
+        |> Map.put("original_filename", upload.filename)
+        |> Map.put("file_type", Librarian.Utils.FileDetector.mime_type(upload.filename))
+
+      _ ->
+        params
+    end
+  after
+    # Clean up temp file if we created one
+    :ok
   end
 end

@@ -34,6 +34,9 @@ defmodule Librarian.Curator.Stub do
     facts = pick_fact_like_sentences(sentences)
     tags = top_keywords(keyword_freqs, first_seen, 6)
     importance = score_importance(chunk, keyword_freqs)
+    # Deterministic, no-network bucket assignment for tests. The keyword
+    # classifier uses word-boundary matching (see Librarian.Router).
+    bucket = Librarian.Router.classify_bucket(text)
 
     {:ok,
      %Librarian.Curator.Result{
@@ -41,6 +44,7 @@ defmodule Librarian.Curator.Stub do
        facts: facts,
        tags: tags,
        importance: importance,
+       bucket: bucket,
        embedding: nil
      }}
   end

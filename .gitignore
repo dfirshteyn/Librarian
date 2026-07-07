@@ -25,6 +25,7 @@ librarian-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 .env
+.env*
 
 # .wal logs
 *.wal

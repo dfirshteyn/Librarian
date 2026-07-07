@@ -1,12 +1,20 @@
 defmodule Librarian.Router do
   @moduledoc """
-  The "gating" layer. Cheap keyword/pattern rules decide which bucket a
-  payload likely belongs to *before* any embedding work happens — same
-  idea as MoE routing, just deterministic instead of learned, because
-  deterministic is free and instant.
+  The "gating" layer for ingest-time namespacing.
 
-  Buckets are configurable; falls back to `"inbox"` (the random/uncategorized
-  bucket) when nothing matches, rather than ever blocking on classification.
+  HOT is a staging buffer, not a classifier: `route/2` now assigns every
+  payload to `"user_id:inbox"` so the HOT bucket name is purely a per-user
+  namespace. The *semantic* bucket decision happens later, at flush time,
+  when the configured curator (a real model in production, a deterministic
+  keyword fallback in tests) returns a `bucket` field on its `Curator.Result`.
+
+  This avoids the old bug where a keyword matched at ingest baked the wrong
+  bucket into the ETS key and the curator's semantic decision was silently
+  discarded.
+
+  The keyword classifier is still available as `classify_bucket/1` for the
+  Stub curator (fast, deterministic, no network) — production backends ask
+  the model to decide the bucket instead of reusing keywords.
   """
 
   @default_rules [
@@ -22,32 +30,49 @@ defmodule Librarian.Router do
                     cost price cloud alibaba qwen coupon token spend)}
   ]
 
+  @valid_buckets ["project", "research", "ideas", "thoughts", "finance", "inbox"]
+
   @doc """
-  Returns `{bucket, matched_tags}` where bucket is namespaced as
-  "user_id:bucket_name" — different users' processes never collide in
-  the Registry or DynamicSupervisor.
+  Ingest-time namespacing only. Returns `{bucket, hint_tags}` where bucket
+  is always `"user_id:inbox"` — HOT is a buffer, classification is deferred
+  to the curator at flush time.
   """
   def route(%Librarian.Capture.Payload{} = payload, user_id \\ "local") do
-    text = String.downcase(payload.raw_text)
     hints = Enum.map(payload.hint_tags, &String.downcase/1)
+    {"#{user_id}:inbox", hints}
+  end
+
+  @doc """
+  Deterministic keyword classifier used by the Stub curator (tests, no
+  network). Returns a bare bucket name from `@valid_buckets`, defaulting to
+  `"inbox"` when nothing matches. Word-boundary matching only — "we" must
+  not match inside "weather" (a real bug we fixed long ago).
+  """
+  def classify_bucket(text) when is_binary(text) do
+    lowered = String.downcase(text)
 
     scored =
       rules()
       |> Enum.map(fn {bucket, keywords} ->
-        matched = Enum.filter(keywords, &word_match?(text, &1))
-        {bucket, matched}
+        matched = Enum.filter(keywords, &word_match?(lowered, &1))
+        {bucket, length(matched)}
       end)
-      |> Enum.reject(fn {_bucket, matched} -> matched == [] end)
-      |> Enum.sort_by(fn {_bucket, matched} -> -length(matched) end)
+      |> Enum.reject(fn {_bucket, n} -> n == 0 end)
+      |> Enum.sort_by(fn {_bucket, n} -> -n end)
 
-    {raw_bucket, tags} =
-      case scored do
-        [{bucket, matched} | _] -> {bucket, Enum.uniq(matched ++ hints)}
-        [] -> {"inbox", hints}
-      end
-
-    {"#{user_id}:#{raw_bucket}", tags}
+    case scored do
+      [{bucket, _} | _] -> bucket
+      [] -> "inbox"
+    end
   end
+
+  @doc "Validate/normalize a curator-provided bucket name; unknown values fall back to inbox."
+  def normalize_bucket(name) when is_binary(name) do
+    bare = name |> String.downcase() |> String.trim()
+    if bare in @valid_buckets, do: bare, else: "inbox"
+  end
+
+  def normalize_bucket(_), do: "inbox"
 
   # Word-boundary match, not raw substring — "we" must not match inside
   # "weather", "i" must not match inside "nothing". This was a real bug

@@ -13,13 +13,15 @@ defmodule Librarian.Curator.QwenApiTest do
           "summary" => "switched db to sqlite",
           "facts" => ["team chose sqlite over postgres"],
           "tags" => ["sqlite", "database", "decision"],
-          "importance" => 0.8
+          "importance" => 0.8,
+          "bucket" => "project"
         })
 
       assert result.summary == "switched db to sqlite"
       assert result.facts == ["team chose sqlite over postgres"]
       assert result.tags == ["sqlite", "database", "decision"]
       assert result.importance == 0.8
+      assert result.bucket == "project"
     end
 
     test "tolerates missing optional keys with safe defaults" do
@@ -29,6 +31,12 @@ defmodule Librarian.Curator.QwenApiTest do
       assert result.facts == []
       assert result.tags == []
       assert result.importance == 0.5
+      assert result.bucket == "inbox"
+    end
+
+    test "normalizes an unknown model-provided bucket down to inbox" do
+      result = call_parse_result(%{"summary" => "x", "bucket" => "not-a-real-bucket"})
+      assert result.bucket == "inbox"
     end
 
     test "coerces integer importance to float" do

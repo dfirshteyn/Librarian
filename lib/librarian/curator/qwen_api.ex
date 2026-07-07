@@ -77,6 +77,7 @@ defmodule Librarian.Curator.QwenApi do
     - "facts": a JSON array of short atomic fact strings (max 5)
     - "tags": a JSON array of 3-6 lowercase keyword strings for associative linking
     - "importance": a float 0.0-1.0 reflecting how decision-critical this is
+    - "bucket": one of "project", "research", "ideas", "thoughts", "finance", "inbox" — the single best semantic bucket for this memory. Use "inbox" only if it fits none of the others.
 
     Respond with ONLY the JSON object, no markdown, no explanation.
 
@@ -128,14 +129,15 @@ defmodule Librarian.Curator.QwenApi do
     with content when is_binary(content) <-
            get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-      {:ok,
-       %Librarian.Curator.Result{
-         summary: map["summary"] || "",
-         facts: map["facts"] || [],
-         tags: map["tags"] || [],
-         importance: to_float(map["importance"]),
-         embedding: nil
-       }}
+        {:ok,
+         %Librarian.Curator.Result{
+           summary: map["summary"] || "",
+           facts: map["facts"] || [],
+           tags: map["tags"] || [],
+           importance: to_float(map["importance"]),
+           bucket: Librarian.Router.normalize_bucket(map["bucket"]),
+           embedding: nil
+         }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

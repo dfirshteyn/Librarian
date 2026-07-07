@@ -6,6 +6,7 @@ defmodule Librarian.Curator.Result do
     :facts,
     :tags,
     :importance,
+    :bucket,
     :embedding
   ]
 
@@ -18,6 +19,10 @@ defmodule Librarian.Curator.Result do
           tags: [String.t()],
           # 0.0 - 1.0, used for decay/forgetting later
           importance: float(),
+          # bare bucket name (e.g. "project") the curator assigned. The Flusher
+          # namespaces this as "user_id:bucket" when writing to WARM. Defaults
+          # to "inbox" in every backend.
+          bucket: String.t(),
           # optional vector; nil if this curator backend doesn't do embeddings
           embedding: [float()] | nil
         }

@@ -133,10 +133,10 @@ defmodule Librarian.WsServer do
 
       0x1 ->
         if masked? do
-          <<mask::binary-size(4), payload::binary-size(payload_len), _::binary>> = rest
+          <<mask::binary-size(4), payload::binary-size(^payload_len), _::binary>> = rest
           {:text, unmask(payload, mask)}
         else
-          <<payload::binary-size(payload_len), _::binary>> = rest
+          <<payload::binary-size(^payload_len), _::binary>> = rest
           {:text, payload}
         end
 
@@ -160,9 +160,17 @@ defmodule Librarian.WsServer do
   defp handle_message(text, client) do
     case Librarian.Json.decode(text) do
       {:ok, map} ->
-        case Librarian.ingest(map) do
+        case Librarian.IngestRouter.process(map, "local") do
           {:ok, bucket} ->
             send_text(client, Librarian.Json.encode(%{"ok" => true, "bucket" => bucket}))
+
+          {:ok, bucket, chunk_count} ->
+            send_text(client, Librarian.Json.encode(%{
+              "ok" => true,
+              "bucket" => bucket,
+              "chunk_count" => chunk_count,
+              "note" => "Document auto-chunked into #{chunk_count} pieces"
+            }))
 
           {:error, reason} ->
             send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => inspect(reason)}))

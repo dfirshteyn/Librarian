@@ -22,35 +22,50 @@ defmodule Librarian.Flusher do
 
   @supersede_tag_overlap_threshold 0.5
 
-  @doc "Drain one bucket's HOT payloads, run them through the curator, store the result in WARM."
+  @doc """
+  Drain one HOT bucket's payloads and run each through the curator, storing
+  the result in WARM under the *curator-assigned* bucket (not the HOT
+  staging bucket name). The HOT bucket is just a per-user buffer
+  ("user_id:inbox"); the semantic bucket decision belongs to the curator
+  at flush time, which is what lets the model override the old ingest-time
+  keyword routing.
+  """
   def flush_bucket(bucket) do
     case Librarian.HotStore.drain(bucket) do
       [] ->
         :empty
 
       payloads ->
-        case Librarian.Curator.summarize(payloads) do
-          {:ok, result} ->
-            # Enrich with embedding if the backend supports it.
-            # QwenApi returns {:error, :not_implemented}; Stub returns a real
-            # vector. Either way recall/1 degrades gracefully on nil.
-            result =
-              case Librarian.Curator.embed(result.summary) do
-                {:ok, vec} -> %{result | embedding: vec}
-                _ -> result
-              end
+        user_id = bucket |> String.split(":") |> hd()
 
-            memory = Librarian.WarmStore.put(bucket, result)
-            maybe_supersede(memory)
-            Librarian.Wal.truncate(bucket)
-            Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket})
-            {:ok, memory}
+        results =
+          Enum.map(payloads, fn payload ->
+            case Librarian.Curator.summarize([payload]) do
+              {:ok, result} ->
+                result =
+                  case Librarian.Curator.embed(result.summary) do
+                    {:ok, vec} -> %{result | embedding: vec}
+                    _ -> result
+                  end
 
-          {:error, reason} ->
-            # put the payloads back rather than lose them on a curator failure —
-            # this is the "let it crash, don't let it lose data" behaviour.
-            Enum.each(payloads, &Librarian.HotStore.put(bucket, &1))
-            {:error, reason}
+                warm_bucket = "#{user_id}:#{result.bucket || "inbox"}"
+                memory = Librarian.WarmStore.put(warm_bucket, result)
+                maybe_supersede(memory)
+                {:ok, memory}
+
+              {:error, reason} ->
+                # Put this payload back so a curator failure loses nothing.
+                Librarian.HotStore.put(bucket, payload)
+                {:error, reason}
+            end
+          end)
+
+        Librarian.Wal.truncate(bucket)
+        Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket})
+
+        case Enum.filter(results, &match?({:ok, _}, &1)) do
+          [] -> {:error, :all_failed}
+          ok -> {:ok, Enum.map(ok, fn {:ok, m} -> m end)}
         end
     end
   end
