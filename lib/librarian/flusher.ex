@@ -130,9 +130,17 @@ defmodule Librarian.Flusher do
   end
 
   @doc "Flush every bucket that currently has HOT data."
-  def flush_all do
-    Librarian.HotStore.buckets()
-    |> Enum.map(fn bucket -> {bucket, flush_bucket(bucket)} end)
+  def flush_all(max_concurrency \\ 1) do
+    buckets = Librarian.HotStore.buckets()
+
+    if max_concurrency > 1 do
+      buckets
+      |> Task.async_stream(&flush_bucket/1, max_concurrency: max_concurrency, timeout: 60_000)
+      |> Enum.map(fn {bucket, result} -> {bucket, result} end)
+    else
+      buckets
+      |> Enum.map(fn bucket -> {bucket, flush_bucket(bucket)} end)
+    end
   end
 
   @doc "Move anything in WARM below the relevance threshold into the durable COLD archive, then drop it from WARM."
