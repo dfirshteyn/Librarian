@@ -1,16 +1,16 @@
 defmodule LibrarianWeb.DashboardLive do
   use LibrarianWeb, :live_view
 
-  alias Librarian.{WarmStore, HotStore, Flusher}
+  import LibrarianWeb.Dashboard.Components.Header
+  import LibrarianWeb.Dashboard.Components.TenantBanner
+  import LibrarianWeb.Dashboard.Components.TierBar
+  import LibrarianWeb.Dashboard.Components.IngestFeed
+  import LibrarianWeb.Dashboard.Components.WarmCards
+  import LibrarianWeb.Dashboard.Components.RecallConsole
+  import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
+  import LibrarianWeb.Dashboard.Components.InsightsPanel
 
-  @bucket_colors %{
-    "project" => "bg-blue-500",
-    "research" => "bg-purple-500",
-    "finance" => "bg-green-500",
-    "ideas" => "bg-yellow-500",
-    "thoughts" => "bg-pink-500",
-    "inbox" => "bg-gray-500"
-  }
+  alias Librarian.{WarmStore, HotStore, Flusher}
 
   # ── Swarm / Flood demo texts ─────────────────────────────────────────
   @demo_texts [
@@ -149,7 +149,6 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:recall_results, nil)
      |> assign(:insights, Librarian.morning_briefing(20))
      |> assign(:token_savings, compute_token_savings(tenant_id))
-     |> assign(:bucket_colors, @bucket_colors)
      |> assign(:ingest_text, "")
      |> assign(:ingest_bucket, "inbox")
      |> assign(:expanded_memories, MapSet.new())
@@ -200,7 +199,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:token_savings, compute_token_savings(tid))}
   end
 
-  # ── Structured recall commands ──────────────────────────────────────
+  # ── Structured recall commands ─────────────────────────────────────
 
   @impl true
   def handle_event("structured_recall", %{"command" => cmd}, socket) do
@@ -417,12 +416,6 @@ defmodule LibrarianWeb.DashboardLive do
     |> Enum.into(%{})
   end
 
-  defp buckets_list, do: ["project", "research", "finance", "ideas", "thoughts", "inbox"]
-
-  defp bucket_color(bucket, colors), do: Map.get(colors, String.split(bucket, ":") |> List.last(), "bg-gray-500")
-
-  defp importance_pct(importance), do: "width: #{trunc((importance || 0) * 100)}%"
-
   defp compute_token_savings(tenant_id) do
     memories = WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
 
@@ -457,448 +450,23 @@ defmodule LibrarianWeb.DashboardLive do
     end
   end
 
-  defp insight_icon("supersession"), do: "🔄"
-  defp insight_icon("deep_supersession"), do: "⚠️"
-  defp insight_icon("deep_cross_connection"), do: "🔗"
-  defp insight_icon(_), do: "💡"
-
-  defp insight_summary(%{"kind" => "supersession"} = m) do
-    "Superseded: \"#{m["old_summary"]}\" → \"#{m["new_summary"]}\""
-  end
-
-  defp insight_summary(%{"kind" => "deep_supersession"} = m) do
-    "Qwen flagged contradiction: memory ##{m["old_id"]} superseded by ##{m["new_id"]}"
-  end
-
-  defp insight_summary(%{"kind" => "deep_cross_connection"} = m) do
-    "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
-  end
-
-  defp insight_summary(m) do
-    inspect(m)
-  end
-
-  defp tenant_short(tenant_id) do
-    String.slice(tenant_id, 10, 6)
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
     <div class="min-h-screen bg-gray-950 text-gray-100 font-mono p-4">
+      <.header token_savings={@token_savings} flush_concurrency={@flush_concurrency} demo_running={@demo_running} demo_total={@demo_total} />
+      <.tenant_banner tenant_id={@tenant_id} />
+      <.tier_bar hot_counts={@hot_counts} memories={@memories} tenant_id={@tenant_id} />
 
-      <%!-- Header --%>
-      <div class="flex items-center justify-between mb-6">
-        <div>
-          <h1 class="text-2xl font-bold text-white">📚 Librarian</h1>
-          <p class="text-gray-400 text-sm">local-first memory daemon · BEAM/OTP</p>
-        </div>
-        <div class="flex items-center gap-4">
-          <%!-- Token savings badge --%>
-          <div class="bg-gray-800 rounded px-3 py-1.5 text-xs">
-            <span class="text-gray-400">Token savings: </span>
-            <span class="text-green-400 font-bold"><%= @token_savings.savings_pct %>%</span>
-            <span class="text-gray-600"> | </span>
-            <span class="text-gray-400"><%= @token_savings.curated_tokens %> curated</span>
-          </div>
-          <button phx-click="flush_all"
-            class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">
-            Flush HOT → WARM
-          </button>
-          <button phx-click="nightly_pass"
-            class="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 rounded text-sm transition">
-            Nightly Pass (Qwen)
-          </button>
-          <select phx-change="set_flush_concurrency" name="value"
-            class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
-            <%= for c <- [1, 2, 3, 4] do %>
-              <option value={c} selected={@flush_concurrency == c}><%= c %>x</option>
-            <% end %>
-          </select>
-          <button phx-click="flood_demo"
-            disabled={@demo_running}
-            class={if @demo_running, do: "px-3 py-1.5 rounded text-sm transition bg-gray-700 cursor-not-allowed", else: "px-3 py-1.5 rounded text-sm transition bg-green-700 hover:bg-green-600"}>
-            <%= if @demo_running, do: "Running... #{@demo_total}", else: "Flood Demo" %>
-          </button>
-          <button phx-click="swarm_demo"
-            disabled={@demo_running}
-            class={if @demo_running, do: "px-3 py-1.5 rounded text-sm transition bg-gray-700 cursor-not-allowed", else: "px-3 py-1.5 rounded text-sm transition bg-amber-600 hover:bg-amber-500"}>
-            <%= if @demo_running, do: "Running... #{@demo_total}", else: "🐝 Swarm Demo" %>
-          </button>
-        </div>
-      </div>
-
-      <%!-- Tenant Identity Banner --%>
-      <div class="bg-gradient-to-r from-indigo-900/60 via-purple-900/40 to-gray-900 rounded-lg border border-indigo-800/50 p-4 mb-5">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <span class="text-xl">📦</span>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-bold text-white">Active Memory Vault:</span>
-                <code class="text-sm bg-gray-800 px-2 py-0.5 rounded text-indigo-300 font-mono"><%= @tenant_id %></code>
-                <button data-tenant-id={@tenant_id} onclick="var tid=this.getAttribute('data-tenant-id');navigator.clipboard.writeText(tid);this.textContent='Copied!';setTimeout(()=>this.textContent='📋 Copy Token',1500)"
-                  class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-2 py-1 rounded transition">
-                  📋 Copy Token
-                </button>
-              </div>
-              <p class="text-xs text-gray-400 mt-1">
-                This session is sandboxed in a local SQLite WAL file. No account required.
-              </p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-500">Isolated</span>
-            <span class="w-2 h-2 rounded-full bg-green-500" title="sandboxed" />
-          </div>
-        </div>
-      </div>
-
-      <%!-- Tier bar --%>
-      <div class="flex gap-3 mb-6 flex-wrap">
-        <%= for {bucket, count} <- Enum.sort(@hot_counts) do %>
-          <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
-            <span class={"w-2 h-2 rounded-full #{bucket_color(bucket, @bucket_colors)}"} />
-            <span class="text-xs text-gray-300"><%= String.split(bucket, ":") |> List.last() %></span>
-            <span class="text-xs font-bold text-white"><%= count %> HOT</span>
-            <button phx-click="flush_bucket" phx-value-bucket={bucket}
-              class="ml-1 text-xs text-blue-400 hover:text-blue-300">[flush]</button>
-          </div>
-        <% end %>
-        <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
-          <span class="text-xs text-gray-300">WARM</span>
-          <span class="text-xs font-bold text-white"><%= length(@memories) %></span>
-        </div>
-        <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
-          <span class="text-xs text-gray-300">🔢 embedded</span>
-          <span class="text-xs font-bold text-white"><%= Enum.count(@memories, &(not is_nil(&1.embedding))) %></span>
-        </div>
-        <div class="flex items-center gap-2 bg-amber-900/50 rounded px-3 py-1.5 border border-amber-700">
-          <span class="text-xs text-amber-300">🔒 sandbox: <%= tenant_short(@tenant_id) %></span>
-        </div>
-      </div>
-
-      <%!-- Top row: 3 columns — Ingest, WARM, Recall --%>
       <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 160px);">
-
-        <%!-- Left: live ingest feed --%>
-        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
-          <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-            ⚡ Live Ingest Feed
-            <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
-          </h2>
-
-          <%!-- Manual ingest form --%>
-          <form phx-submit="manual_ingest" class="mb-4 space-y-2">
-            <textarea name="text" value={@ingest_text} rows="2" placeholder="Paste text to ingest..."
-              class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"></textarea>
-            <div class="flex gap-2">
-              <select name="bucket" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
-                <%= for b <- buckets_list() do %>
-                  <option value={b} selected={@ingest_bucket == b}><%= b %></option>
-                <% end %>
-              </select>
-              <button type="submit"
-                class="flex-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">
-                Ingest
-              </button>
-            </div>
-          </form>
-
-          <div class="flex-1 overflow-y-auto space-y-2" id="feed" phx-update="stream" style="max-height: 400px;">
-            <div :if={@feed_empty} id="feed-empty" class="text-gray-600 text-xs">
-              Waiting for ingest events... run Flood Demo or Swarm Demo.
-            </div>
-            <%= for {dom_id, entry} <- @streams.feed do %>
-              <div id={dom_id} class="border-l-2 border-gray-700 pl-3 py-1">
-                <div class="flex items-center gap-2 mb-0.5">
-                  <span class={"w-2 h-2 rounded-full flex-shrink-0 #{bucket_color(entry.bucket, @bucket_colors)}"} />
-                  <span class="text-xs font-bold text-gray-200"><%= entry.bucket %></span>
-                  <span class="text-xs text-gray-500"><%= entry.source %></span>
-                  <span class="text-xs text-gray-600 ml-auto"><%= entry.at %></span>
-                </div>
-                <p class="text-xs text-gray-400 truncate"><%= entry.preview %></p>
-              </div>
-            <% end %>
-          </div>
-        </div>
-
-        <%!-- Second: WARM memory cards --%>
-        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
-          <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-            🧠 WARM Memory Tier
-            <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
-          </h2>
-          <div class="flex-1 overflow-y-auto space-y-3">
-            <%= for memory <- Enum.sort_by(@memories, &(-&1.importance)) do %>
-              <div class={"bg-gray-800 rounded p-3 border #{if MapSet.member?(@expanded_memories, memory.id), do: "border-blue-500", else: "border-gray-700"} cursor-pointer"}
-                   phx-click="toggle_memory" phx-value-id={memory.id}>
-                <div class="flex items-center gap-2 mb-2">
-                  <span class={"w-2 h-2 rounded-full flex-shrink-0 #{bucket_color(memory.bucket, @bucket_colors)}"} />
-                  <span class="text-xs font-bold text-gray-200"><%= String.split(memory.bucket, ":") |> List.last() %></span>
-                  <span class="text-xs text-gray-500 ml-auto">#<%= memory.id %></span>
-                </div>
-                <p class="text-xs text-gray-300 mb-2"><%= memory.summary %></p>
-
-                <div class="h-1 bg-gray-700 rounded mb-2">
-                  <div class="h-1 bg-blue-500 rounded" style={importance_pct(memory.importance)} />
-                </div>
-
-                <%= if MapSet.member?(@expanded_memories, memory.id) do %>
-                  <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
-                    <div>
-                      <span class="text-xs text-gray-400">Facts:</span>
-                      <%= if memory.facts && memory.facts != [] do %>
-                        <ul class="text-xs text-gray-300 mt-1 space-y-1 list-disc list-inside">
-                          <%= for fact <- memory.facts do %>
-                            <li><%= fact %></li>
-                          <% end %>
-                        </ul>
-                      <% else %>
-                        <p class="text-xs text-gray-600 mt-1">No facts extracted</p>
-                      <% end %>
-                    </div>
-                    <div class="flex gap-3 text-xs">
-                      <span class="text-gray-400">Created: <%= DateTime.to_iso8601(memory.created_at) %></span>
-                      <%= if memory.embedding do %>
-                        <span class="text-blue-400">🔢 Embedding: <%= length(memory.embedding) %>-dim</span>
-                      <% end %>
-                    </div>
-                    <div class="text-xs">
-                      <span class="text-gray-400">Tags: </span>
-                      <%= for tag <- (memory.tags || []) do %>
-                        <span class="text-xs bg-gray-700 text-gray-300 rounded px-1.5 py-0.5"><%= tag %></span>
-                      <% end %>
-                    </div>
-                    <%= if memory.superseded_by do %>
-                      <div class="text-xs text-yellow-400">⚠️ Superseded by #<%= memory.superseded_by %></div>
-                    <% end %>
-                  </div>
-                <% end %>
-              </div>
-            <% end %>
-            <p :if={@memories == []} class="text-gray-600 text-xs">
-              No memories yet. Run Flood Demo or Swarm Demo to populate.
-            </p>
-          </div>
-        </div>
-
-        <%!-- Third: recall console --%>
-        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
-          <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-            🔍 Recall Console
-            <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
-          </h2>
-          <form phx-submit="recall" class="mb-4">
-            <div class="flex gap-2">
-              <input type="text" name="query" value={@query}
-                placeholder="search your memories..."
-                class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                autofocus />
-              <button type="submit"
-                class="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">
-                Recall
-              </button>
-            </div>
-          </form>
-
-          <div class="flex-1 overflow-y-auto">
-            <%= if @recall_results do %>
-              <p class="text-xs text-gray-500 mb-3">
-                "<%= @recall_results.query %>" →
-                <%= length(@recall_results.warm) %> direct,
-                <%= length(@recall_results.related) %> synaptic jumps
-              </p>
-              <%= for memory <- @recall_results.warm do %>
-                <div class="bg-gray-800 rounded p-2 mb-2 border-l-2 border-blue-500">
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(memory.bucket, @bucket_colors)}"} />
-                    <span class="text-xs font-bold text-gray-200"><%= memory.bucket %></span>
-                    <span class="text-xs text-gray-500">score=<%= Float.round(memory.importance, 3) %></span>
-                  </div>
-                  <p class="text-xs text-gray-300 line-clamp-3"><%= memory.summary %></p>
-                </div>
-              <% end %>
-              <%= if @recall_results.related != [] do %>
-                <p class="text-xs text-yellow-500 mt-3 mb-2">⚡ Synaptic jumps (cross-bucket)</p>
-                <%= for memory <- @recall_results.related do %>
-                  <div class="bg-gray-800 rounded p-2 mb-2 border-l-2 border-yellow-500">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(memory.bucket, @bucket_colors)}"} />
-                      <span class="text-xs font-bold text-gray-200"><%= memory.bucket %></span>
-                    </div>
-                    <p class="text-xs text-gray-300 line-clamp-2"><%= memory.summary %></p>
-                  </div>
-                <% end %>
-              <% end %>
-              <p :if={@recall_results.warm == []} class="text-gray-600 text-xs">
-                No memories match "<%= @recall_results.query %>"
-              </p>
-            <% else %>
-              <p class="text-gray-600 text-xs">Enter a query to search WARM memories.</p>
-              <p class="text-gray-700 text-xs mt-2">
-                3-way RRF: keyword + BGE-M3 vector + importance. Isolated to your session.
-              </p>
-            <% end %>
-          </div>
-        </div>
+        <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} />
+        <.warm_cards tenant_id={@tenant_id} memories={@memories} expanded_memories={@expanded_memories} />
+        <.recall_console tenant_id={@tenant_id} query={@query} recall_results={@recall_results} />
       </div>
 
-      <%!-- Bottom row: 2 columns — Structured Recall, Insights --%>
       <div class="grid grid-cols-2 gap-4" style="height: calc(50vh - 160px);">
-
-        <%!-- Structured Recall terminal --%>
-        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col border border-green-800">
-          <h2 class="text-sm font-bold text-green-300 mb-3 uppercase tracking-wider">
-            💻 Structured Recall
-            <span class="text-green-600 text-[10px]">/model /recall /status</span>
-            <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
-          </h2>
-          <form phx-submit="structured_recall" class="mb-3">
-            <div class="flex gap-2">
-              <span class="text-green-400 text-sm font-bold">$></span>
-              <input type="text" name="command"
-                placeholder="/model database performance | /recall deploy | /status"
-                class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
-              <button type="submit"
-                class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
-                Run
-              </button>
-            </div>
-          </form>
-
-          <div class="flex-1 overflow-y-auto bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs">
-            <%= if @structured_response do %>
-              <%= case @structured_response.type do %>
-                <% "model_recall" -> %>
-                  <div>
-                    <p class="text-green-400 mb-2">
-                      <span class="text-green-600">MATCHES:</span>
-                      <%= @structured_response.count %> memories for "<%= @structured_response.query %>"
-                    </p>
-                    <%= for mem <- @structured_response.memories do %>
-                      <div class="bg-gray-900 rounded p-2 mb-2 border-l-2 border-green-500">
-                        <div class="flex items-center gap-2 mb-1">
-                          <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(mem.bucket, @bucket_colors)}"} />
-                          <span class="text-gray-200 font-bold"><%= mem.bucket %></span>
-                          <span class="text-gray-500">#<%= mem.id %></span>
-                          <span class="text-gray-500 ml-auto">imp=<%= Float.round(mem.importance, 2) %></span>
-                        </div>
-                        <p class="text-gray-300 mb-1"><%= mem.summary %></p>
-                        <%= if mem.facts != [] do %>
-                          <ul class="text-gray-400 space-y-0.5 list-none">
-                            <%= for fact <- mem.facts do %>
-                              <li>• <%= fact %></li>
-                            <% end %>
-                          </ul>
-                        <% end %>
-                        <div class="flex gap-1 mt-1">
-                          <%= for tag <- mem.tags do %>
-                            <span class="bg-gray-800 text-gray-400 rounded px-1 py-0.5 text-[10px]"><%= tag %></span>
-                          <% end %>
-                        </div>
-                      </div>
-                    <% end %>
-                  </div>
-
-                <% "search_recall" -> %>
-                  <div>
-                    <p class="text-cyan-400 mb-2">
-                      <span class="text-cyan-600">SEARCH:</span>
-                      <%= @structured_response.warm_count %> warm, <%= @structured_response.related_count %> related for "<%= @structured_response.query %>"
-                    </p>
-                    <%= if @structured_response.warm != [] do %>
-                      <p class="text-gray-500 mb-1">WARM (top 5):</p>
-                      <ul class="text-gray-300 space-y-1">
-                        <%= for s <- @structured_response.warm do %>
-                          <li>• <%= s %></li>
-                        <% end %>
-                      </ul>
-                    <% end %>
-                    <%= if @structured_response.related != [] do %>
-                      <p class="text-yellow-500 mb-1 mt-2">SYNAPTIC JUMPS:</p>
-                      <ul class="text-yellow-300 space-y-1">
-                        <%= for s <- @structured_response.related do %>
-                          <li>• <%= s %></li>
-                        <% end %>
-                      </ul>
-                    <% end %>
-                  </div>
-
-                <% "status" -> %>
-                  <div>
-                    <p class="text-amber-400 mb-2">
-                      <span class="text-amber-600">STATUS:</span> <%= @tenant_id %>
-                    </p>
-                    <%= for {bucket, count} <- Enum.sort(Map.to_list(@structured_response.data.hot || %{})) do %>
-                      <div class="flex items-center gap-2 mb-1">
-                        <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(bucket, @bucket_colors)}"} />
-                        <span class="text-gray-300"><%= bucket %>: <%= count %> HOT</span>
-                      </div>
-                    <% end %>
-                    <p class="text-gray-300 mt-2">WARM total: <%= @structured_response.data.warm_count %></p>
-                  </div>
-
-                <% "error" -> %>
-                  <p class="text-red-400">
-                    <span class="text-red-600">ERROR:</span> <%= @structured_response.message %>
-                  </p>
-
-                <% _ -> %>
-                  <p class="text-gray-500">Unknown response type</p>
-              <% end %>
-            <% else %>
-              <p class="text-gray-600">
-                Memory as a database. Type a command:
-              </p>
-              <ul class="text-gray-600 mt-2 space-y-1">
-                <li><span class="text-green-600">/model [query]</span> — structured facts from matching memories</li>
-                <li><span class="text-cyan-600">/recall [query]</span> — search summaries with synaptic jumps</li>
-                <li><span class="text-amber-600">/status</span> — tier counts for current session</li>
-              </ul>
-              <p class="text-gray-700 mt-3 text-[10px]">
-                Queries isolated to your session sandbox. Export your data anytime.
-              </p>
-            <% end %>
-          </div>
-        </div>
-
-        <%!-- Connections / Insights panel --%>
-        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
-          <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-            🔗 Connections & Insights
-          </h2>
-          <div class="flex-1 overflow-y-auto space-y-3">
-            <%= if @insights == [] do %>
-              <p class="text-gray-600 text-xs">
-                No insights yet. Run the Nightly Pass (Qwen) to discover cross-bucket connections, contradictions, and patterns.
-              </p>
-              <div class="bg-gray-800 rounded p-3 border border-gray-700 mt-2">
-                <p class="text-xs text-gray-400">
-                  The Qwen deep pass analyzes all WARM memories together to find:
-                </p>
-                <ul class="text-xs text-gray-500 mt-2 space-y-1 list-disc list-inside">
-                  <li>Cross-bucket connections (synaptic jumps)</li>
-                  <li>Contradictions between decisions</li>
-                  <li>Repeated patterns across sessions</li>
-                  <li>Re-ranking of importance scores</li>
-                </ul>
-              </div>
-            <% else %>
-              <%= for insight <- @insights do %>
-                <div class="bg-gray-800 rounded p-3 border border-gray-700">
-                  <div class="flex items-center gap-2 mb-1">
-                    <span class="text-xs"><%= insight_icon(insight["kind"]) %></span>
-                    <span class="text-xs text-gray-400"><%= insight["kind"] %></span>
-                    <span class="text-xs text-gray-600 ml-auto"><%= insight["logged_at"] %></span>
-                  </div>
-                  <p class="text-xs text-gray-300"><%= insight_summary(insight) %></p>
-                </div>
-              <% end %>
-            <% end %>
-          </div>
-        </div>
-
+        <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} />
+        <.insights_panel insights={@insights} />
       </div>
     </div>
     """
