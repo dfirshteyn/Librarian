@@ -4,7 +4,7 @@ defmodule Librarian.Curator.LlamaCpp do
   real-time summarization and embedding.
 
   Supports separate URLs for chat and embedding, so you can run a large
-  reasoning model on one port (e.g., 35B Qwen on :1234) and a dedicated
+  reasoning model on one port (e.g., 0.6B Qwen on :1234) and a dedicated
   embedding model on another (e.g., BGE-M3 on :1235). The embed function
   accepts an optional URL override — see `Librarian.Curator.Hybrid` for
   the wiring.
@@ -19,7 +19,7 @@ defmodule Librarian.Curator.LlamaCpp do
       config :librarian, embed_url: "http://localhost:1235/v1"
 
   Model override (defaults to whatever llama.cpp has loaded):
-      config :librarian, llama_cpp_model: "qwen2.5-1.5b-instruct"
+      config :librarian, llama_cpp_model: "qwen3.5-0.6b-instruct"
 
   LeakGuard scrubbing happens in `Librarian.Curator.summarize/1` before
   this module is ever called — the chunk arriving here is already clean.

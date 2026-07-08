@@ -19,7 +19,7 @@ config :librarian,
   parallel_flush_max_concurrency: 1
 
 # Ecto repo
-config :librarian, Librarian.Repo, database: "librarian_#{Mix.env()}"
+config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.db"
 
 config :librarian, ecto_repos: [Librarian.Repo]
 

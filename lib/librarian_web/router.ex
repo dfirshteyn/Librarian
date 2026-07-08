@@ -12,6 +12,28 @@ defmodule LibrarianWeb.Router do
 
   pipeline :api do
     plug(:accepts, ["json"])
+    plug(:check_rate)
+  end
+
+  # Rate limiter plug — 100 req/min per IP+tenant pair, burst to 200
+  defp check_rate(conn, _opts) do
+    user_id =
+      case Plug.Conn.get_req_header(conn, "x-user-id") do
+        [id | _] when byte_size(id) > 0 -> id
+        _ -> "local"
+      end
+
+    key = "#{:inet.ntoa(conn.remote_ip)}:#{user_id}"
+
+    case Librarian.RateLimiter.allow?(key) do
+      :ok ->
+        conn
+
+      {:error, :rate_limited} ->
+        conn
+        |> send_resp(429, ~s/{"error":"rate limit exceeded","retry_after_ms":60000}/)
+        |> halt()
+    end
   end
 
   scope "/", LibrarianWeb do
@@ -25,5 +47,6 @@ defmodule LibrarianWeb.Router do
     post("/flush", ApiController, :flush)
     get("/recall", ApiController, :recall)
     get("/status", ApiController, :status)
+    get("/export", ApiController, :export)
   end
 end

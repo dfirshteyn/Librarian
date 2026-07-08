@@ -1,10 +1,7 @@
 import Config
 
 config :librarian, Librarian.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "librarian_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "tmp/test_data/librarian_test#{System.get_env("MIX_TEST_PARTITION")}.db",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 

@@ -59,10 +59,16 @@ defmodule Librarian.ColdStore.ConnectionManager do
 
   @doc """
   Initialize the ETS table. Called from Application.start.
+  Safe to call multiple times — returns :ok if already exists.
   """
   def init_table do
-    :ets.new(@table, [:set, :named_table, :public])
-    :ok
+    case :ets.info(@table) do
+      :undefined ->
+        :ets.new(@table, [:set, :named_table, :public])
+        :ok
+      _ ->
+        :ok
+    end
   end
 
   @doc """

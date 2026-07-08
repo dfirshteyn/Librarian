@@ -102,11 +102,62 @@ defmodule LibrarianWeb.ApiController do
 
   # X-User-Id header for multi-tenant — in production this would be
   # validated against a session token. For the hackathon, trust the header.
+  @doc """
+  GET /api/export
+  Optional header: X-User-Id (defaults to "local")
+
+  Downloads a JSON backup of all memories for the requesting user.
+  Used by the "Export/Download Memory Backup" button on the dashboard.
+  """
+  def export(conn, _params) do
+    user_id = get_user_id(conn)
+    path = Librarian.ColdStore.ConnectionManager.db_path(user_id)
+
+    if File.exists?(path) do
+      memories = export_memories(user_id)
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> put_resp_header("content-disposition", "attachment; filename=\"#{user_id}_memories.json\"")
+      |> send_resp(200, Jason.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
+    else
+      conn
+      |> put_status(404)
+      |> json(%{ok: false, error: "no memories found for this user"})
+    end
+  end
+
   defp get_user_id(conn) do
     case get_req_header(conn, "x-user-id") do
       [id | _] when byte_size(id) > 0 -> id
       _ -> "local"
     end
+  end
+
+  defp export_memories(user_id) do
+    warm = Librarian.WarmStore.all_for_user(user_id) |> Enum.map(&serialize_memory/1)
+
+    cold =
+      try do
+        conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+        {:ok, result} = Exqlite.query(conn, "SELECT id, bucket, summary, facts, tags, importance, created_at, last_accessed_at FROM memories ORDER BY created_at DESC", [])
+        result.rows |> Enum.map(fn [id, bucket, summary, facts, tags, importance, created_at, last_accessed_at] ->
+          %{
+            id: id,
+            bucket: bucket,
+            summary: summary,
+            facts: facts |> Jason.decode() |> case do {:ok, v} -> v; _ -> [] end,
+            tags: tags |> Jason.decode() |> case do {:ok, v} -> v; _ -> [] end,
+            importance: importance,
+            created_at: created_at,
+            last_accessed_at: last_accessed_at
+          }
+        end)
+      rescue
+        _ -> []
+      end
+
+    %{warm: warm, cold: cold}
   end
 
   defp serialize_memory(m) do

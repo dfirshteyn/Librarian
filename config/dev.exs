@@ -1,10 +1,7 @@
 import Config
 
 config :librarian, Librarian.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "librarian_dev",
+  database: "priv/data/librarian_dev.db",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10

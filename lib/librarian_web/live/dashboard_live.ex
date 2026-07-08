@@ -762,6 +762,11 @@ defmodule LibrarianWeb.DashboardLive do
           <span class="text-xs text-gray-500">
             role: <span class="text-gray-300"><%= role_for(@selected_user) %></span>
           </span>
+          <a href={"/api/export"} x-user-id={@selected_user}
+             onclick="var id=this.getAttribute('x-user-id'); fetch('/api/export',{headers:{'X-User-Id':id}}).then(r=>r.blob()).then(b=>{var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+'_memories.json';a.click()});return false;"
+             class="text-xs text-green-400 hover:text-green-300 underline ml-2">
+            ⬇ Export My Memories
+          </a>
         <% end %>
 
         <%= if @swarm_running do %>

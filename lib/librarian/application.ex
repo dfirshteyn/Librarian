@@ -20,8 +20,9 @@ defmodule Librarian.Application do
       ]
       |> maybe_add_ws_server()
 
-    # ETS table must exist before any ColdStore connection is requested
+    # ETS tables must exist before any connections are requested
     Librarian.ColdStore.ConnectionManager.init_table()
+    Librarian.RateLimiter.init()
 
     opts = [strategy: :one_for_one, name: Librarian.Supervisor]
 

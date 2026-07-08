@@ -27,8 +27,15 @@ librarian-*.tar
 .env
 .env*
 
-# .wal logs
-*.wal
+# SQLite database files at root (from Ecto Repo)
+librarian_dev
+librarian_dev-shm
+librarian_dev-wal
+librarian_test
+librarian_test-shm
+librarian_test-wal
+*-shm
+*-wal
 
 # Elixir /priv directory used to store static assets and ETS storage files for the daemon.
 /priv/

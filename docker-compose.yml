@@ -19,11 +19,15 @@ services:
     ports:
       - "4000:4000"   # HTTP (REST API + Dashboard)
       - "4001:4001"   # WebSocket (Chrome extension)
+    depends_on:
+      llama-cpp:
+        condition: service_started
     environment:
       - MIX_ENV=prod
       - PORT=4000
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - LLAMA_CPP_URL=${LLAMA_CPP_URL:-}
+      - LLAMA_CPP_URL=http://llama-cpp:1234/v1
+      - EMBED_URL=http://llama-cpp:1235/v1
       - SECRET_KEY_BASE=${SECRET_KEY_BASE:-}
       # Database: uses SQLite file by default — mount a volume to persist
       # For Postgres (production), set DATABASE_URL instead
@@ -41,6 +45,39 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # llama.cpp server running Qwen 0.6B Q4_K_M + BGE-small embedding model
+  # The models directory should contain:
+  #   - qwen2.5-0.5b-q4_k_m.gguf  (completion, port 1234)
+  #   - bge-small-en-v1.5-q8_0.gguf (embedding, port 1235)
+  # Downloads are automatic on first run via the init script below.
+  llama-cpp:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    ports:
+      - "1234:1234"   # Completion endpoint
+      - "1235:1235"   # Embedding endpoint
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-}
+    volumes:
+      - ./models:/models
+      - ./priv/scripts/download_models.sh:/download_models.sh
+    command: >
+      sh -c "
+        /download_models.sh || true &&
+        /app/server
+        --host 0.0.0.0 --port 1234
+        --embedding --embedding-port 1235
+        -m /models/qwen2.5-0.5b-q4_k_m.gguf
+        -ngl 99 -c 4096
+      "
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
 
 volumes:
   librarian_data:
