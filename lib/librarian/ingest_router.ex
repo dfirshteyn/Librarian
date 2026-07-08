@@ -151,6 +151,7 @@ defmodule Librarian.IngestRouter do
       false ->
         case List.first(results) do
           {:ok, {:ok, bucket}} -> {:ok, bucket, length(chunks)}
+          {:ok, {:ok, bucket, :duplicate}} -> {:ok, bucket, length(chunks)}
           _ -> {:error, "Unknown chunking result"}
         end
     end

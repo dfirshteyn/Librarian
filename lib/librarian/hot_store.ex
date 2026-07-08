@@ -21,6 +21,23 @@ defmodule Librarian.HotStore do
     GenServer.cast(via(bucket), {:put, payload})
   end
 
+  @doc """
+  Put a payload only if an identical raw_text isn't already in HOT.
+  Returns `{:ok, :stored}` or `{:ok, :duplicate}`.
+  """
+  def put_unless_duplicate(bucket, %Librarian.Capture.Payload{} = payload) do
+    ensure_started(bucket)
+    GenServer.call(via(bucket), {:put_unless_duplicate, payload})
+  end
+
+  @doc "Check if a payload with the same raw_text already exists in this HOT bucket."
+  def contains_text?(bucket, text) do
+    case Registry.lookup(@registry, bucket) do
+      [{pid, _}] -> GenServer.call(pid, {:contains_text?, text})
+      [] -> false
+    end
+  end
+
   def all(bucket) do
     case Registry.lookup(@registry, bucket) do
       [{pid, _}] -> GenServer.call(pid, :all)
@@ -64,6 +81,19 @@ defmodule Librarian.HotStore do
 
   defp via(bucket), do: {:via, Registry, {@registry, bucket}}
 
+  # Scan the ordered_set ETS table for an existing payload with the same raw_text.
+  # ETS is :ordered_set keyed by {seq}, so we must scan — but HOT is small
+  # (hundreds of items max), so this is fast.
+  defp exists_raw_text?(table, text) do
+    :ets.foldl(
+      fn {_seq, payload}, acc ->
+        if payload.raw_text == text, do: true, else: acc
+      end,
+      false,
+      table
+    )
+  end
+
   # --- GenServer ---
 
   def child_spec(bucket) do
@@ -104,6 +134,22 @@ defmodule Librarian.HotStore do
     Librarian.Wal.append(bucket, payload)
     :ets.insert(table, {seq, payload})
     {:noreply, %{state | seq: seq + 1}}
+  end
+
+  @impl true
+  def handle_call({:put_unless_duplicate, payload}, _from, %{bucket: bucket, table: table, seq: seq} = state) do
+    if exists_raw_text?(table, payload.raw_text) do
+      {:reply, {:ok, :duplicate}, state}
+    else
+      Librarian.Wal.append(bucket, payload)
+      :ets.insert(table, {seq, payload})
+      {:reply, {:ok, :stored}, %{state | seq: seq + 1}}
+    end
+  end
+
+  @impl true
+  def handle_call({:contains_text?, text}, _from, %{table: table} = state) do
+    {:reply, exists_raw_text?(table, text), state}
   end
 
   @impl true

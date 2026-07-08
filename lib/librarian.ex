@@ -25,16 +25,22 @@ defmodule Librarian do
   def ingest(%Capture.Payload{} = payload, user_id) do
     {bucket, tags} = Router.route(payload, user_id)
     payload = %{payload | hint_tags: Enum.uniq(payload.hint_tags ++ tags)}
-    HotStore.put(bucket, payload)
-    preview = String.slice(payload.raw_text, 0, 80)
 
-    Phoenix.PubSub.broadcast(
-      Librarian.PubSub,
-      "ingest",
-      {:ingested, bucket, payload.source, preview, user_id}
-    )
+    case HotStore.put_unless_duplicate(bucket, payload) do
+      {:ok, :duplicate} ->
+        {:ok, bucket, :duplicate}
 
-    {:ok, bucket}
+      {:ok, :stored} ->
+        preview = String.slice(payload.raw_text, 0, 80)
+
+        Phoenix.PubSub.broadcast(
+          Librarian.PubSub,
+          "ingest",
+          {:ingested, bucket, payload.source, preview, user_id}
+        )
+
+        {:ok, bucket}
+    end
   end
 
   @doc "Recall memories for a user. Synaptic jumps are cross-bucket within the same user's namespace."

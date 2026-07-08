@@ -34,7 +34,9 @@ defmodule Librarian.Curator.LlamaCpp do
 
     with {:ok, body} <- chat(prompt),
          {:ok, result} <- parse_result(body) do
-      {:ok, result}
+      bucket = fallback_bucket(result.bucket, text)
+      cleaned = %{result | facts: deduplicate_facts(result.facts, result.summary), bucket: bucket}
+      {:ok, cleaned}
     end
   end
 
@@ -83,21 +85,24 @@ defmodule Librarian.Curator.LlamaCpp do
 
   defp build_prompt(text) do
     """
-    You are a memory extraction system. Extract information from user text and return ONLY a JSON object with no markdown formatting, no code blocks, no backticks, no explanation.
+    You are a structural memory extraction daemon. Respond ONLY with a raw JSON object. Do not wrap the response in markdown, backticks, or markdown code fences (e.g. do not use ```json).
 
-    Return exactly this structure filled with real extracted values:
-    {"summary":"one sentence","facts":["fact1","fact2"],"tags":["tag1","tag2","tag3"],"importance":0.7,"bucket":"project"}
+    <example>
+    Input: The production database thrashed because the disk filled up to 100%. We need to set up Grafana metrics alerts before Friday.
+    Output: {"summary": "Production database thrashed due to a saturated disk, requiring immediate alerts.", "facts": ["The database experienced a critical storage thrashing event.", "The root cause was the disk capacity reaching 100%.", "Grafana metrics alerts must be configured before Friday."], "tags": ["database", "storage", "alerts", "grafana"], "importance": 0.8, "bucket": "project"}
+    </example>
 
     Rules:
-    - summary: one sentence capturing the core decision or observation
-    - facts: 3-5 atomic factual statements as complete sentences
-    - tags: 3-6 specific keywords, lowercase, no spaces
-    - importance: float 0.0-1.0, decisions=0.7+, observations=0.5, casual=0.2
-    - bucket: one of "project", "research", "ideas", "thoughts", "finance", "inbox" — the single best semantic bucket; "inbox" only if none fit
-    - NO markdown, NO backticks, NO code fences, output raw JSON only
+    - summary: Exactly one sentence capturing the core technical decision, event, or observation.
+    - facts: An array of 3-5 distinct, complete atomic sentences. Each fact MUST convey different information — never rephrase the same fact in different words. Do not invent facts not present in the input. Do not use placeholders.
+    - tags: An array of 3-6 specific lowercase keywords. Strictly single words only, no spaces.
+    - importance: A float between 0.0 and 1.0 based on operational priority.
+    - bucket: Strictly choose one string from this list: ["project", "research", "ideas", "thoughts", "finance", "inbox"]. Use "inbox" only if no other category matches.
 
-    Notes:
-    #{text}
+    CRITICAL: facts must each express a DIFFERENT piece of information. If the input only supports 2-3 distinct facts, return 2-3 — do not pad with rephrased duplicates.
+
+    Input: #{text}
+    Output:
     """
   end
 
@@ -168,4 +173,62 @@ defmodule Librarian.Curator.LlamaCpp do
   defp to_float(v) when is_float(v), do: v
   defp to_float(v) when is_integer(v), do: v / 1
   defp to_float(_), do: 0.5
+
+  # When the model returns "inbox" (fallback) or an empty bucket, use
+  # keyword-based classification as a safety net. The model's bucket is
+  # trusted when valid; this only catches failures.
+  defp fallback_bucket("inbox", text), do: Librarian.Router.classify_bucket(text)
+  defp fallback_bucket("", text), do: Librarian.Router.classify_bucket(text)
+  defp fallback_bucket(bucket, _text) when is_binary(bucket), do: bucket
+
+  # Remove near-duplicate facts and any fact that merely rephrases the summary.
+  # Small models tend to restate the same information 2-3 ways; this keeps
+  # only the most informative distinct version of each fact.
+  defp deduplicate_facts(facts, summary) when is_list(facts) and is_binary(summary) do
+    facts
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.reject(&similar_to_summary?(&1, summary))
+    |> deduplicate_similar()
+  end
+
+  defp deduplicate_facts(other, _), do: other || []
+
+  # Reject any fact that is essentially the summary restated.
+  defp similar_to_summary?(fact, summary) do
+    fact_words = tokenize(fact)
+    summary_words = tokenize(summary)
+    overlap = jaccard_similarity(fact_words, summary_words)
+    overlap > 0.5
+  end
+
+  # Remove facts that are near-duplicates of each other (Jaccard > 0.6).
+  # Keeps the longest (most informative) version of each cluster.
+  defp deduplicate_similar(facts) do
+    facts
+    |> Enum.sort_by(&(-String.length(&1)))
+    |> Enum.reduce([], fn fact, kept ->
+      if Enum.any?(kept, &(jaccard_similarity(tokenize(&1), tokenize(fact)) > 0.6)) do
+        kept
+      else
+        [fact | kept]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp tokenize(text) do
+    text
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9\s]/u, " ")
+    |> String.split()
+    |> Enum.reject(&(&1 in ~w(the a an is was were be been to of in on at for with)))
+  end
+
+  defp jaccard_similarity(a, b) do
+    set_a = MapSet.new(a)
+    set_b = MapSet.new(b)
+    intersection = MapSet.intersection(set_a, set_b) |> MapSet.size()
+    union = MapSet.union(set_a, set_b) |> MapSet.size()
+    if union == 0, do: 0.0, else: intersection / union
+  end
 end

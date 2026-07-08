@@ -103,8 +103,8 @@ defmodule Librarian.IngestRouterTest do
     end
 
     test "chunks large text automatically" do
-      # Create text larger than 1500 character threshold
-      large_text = String.duplicate("This is a sentence that will be repeated many times. ", 200)
+      # Create text larger than 1500 character threshold, each sentence unique
+      large_text = 1..200 |> Enum.map(&"This is sentence number #{&1} that will be repeated many times. ") |> Enum.join()
 
       params = %{"source" => "test_#{:erlang.unique_integer([:positive])}", "raw_text" => large_text}
 
@@ -131,7 +131,8 @@ defmodule Librarian.IngestRouterTest do
 
     test "chunked payloads have parent_id correlation tracking" do
       unique_source = "test_parent_#{:erlang.unique_integer([:positive])}"
-      large_text = String.duplicate("chunk me please project deploy ", 300)
+      # Each sentence is unique so chunk dedup won't remove them
+      large_text = 1..300 |> Enum.map(&"chunk #{&1} project deploy sentence. ") |> Enum.join()
 
       params = %{"source" => unique_source, "raw_text" => large_text}
 

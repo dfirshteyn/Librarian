@@ -102,16 +102,22 @@ defmodule Librarian.Flusher do
           :ok
 
         old_memory ->
-          Librarian.WarmStore.supersede(old_memory.id, new_memory.id)
+          # If the summaries are identical, this is a duplicate, not an
+          # evolution. Don't log a spurious supersession — just skip it.
+          if old_memory.summary == new_memory.summary do
+            :ok
+          else
+            Librarian.WarmStore.supersede(old_memory.id, new_memory.id)
 
-          Librarian.ColdStore.log_insight(%{
-            "kind" => "supersession",
-            "bucket" => new_memory.bucket,
-            "old_id" => old_memory.id,
-            "new_id" => new_memory.id,
-            "old_summary" => old_memory.summary,
-            "new_summary" => new_memory.summary
-          })
+            Librarian.ColdStore.log_insight(%{
+              "kind" => "supersession",
+              "bucket" => new_memory.bucket,
+              "old_id" => old_memory.id,
+              "new_id" => new_memory.id,
+              "old_summary" => old_memory.summary,
+              "new_summary" => new_memory.summary
+            })
+          end
       end
     end
   end
