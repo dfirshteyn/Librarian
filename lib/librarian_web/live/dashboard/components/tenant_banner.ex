@@ -2,6 +2,8 @@ defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
   use Phoenix.Component
 
   attr :tenant_id, :string, required: true
+  attr :tier, :atom, default: :free
+  attr :force_local, :boolean, default: false
 
   def tenant_banner(assigns) do
     ~H"""
@@ -17,9 +19,16 @@ defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
                 class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-2 py-1 rounded transition">
                 📋 Copy Token
               </button>
+              <span class={"text-xs text-white px-2 py-0.5 rounded font-bold " <> tier_badge_color(@tier, @force_local)}>
+                <%= tier_label(@tier, @force_local) %>
+              </span>
             </div>
             <p class="text-xs text-gray-400 mt-1">
-              This session is sandboxed in a local SQLite WAL file. No account required.
+              <%= if @tier == :judge do %>
+                Premium cloud tier — re-curation routed to Alibaba Cloud Qwen. Use <code>?tid=judge_devpost_2026</code> on the URL.
+              <% else %>
+                Free tier — runs fully local on the 1.7B model. Sandboxed in a local SQLite WAL file.
+              <% end %>
             </p>
           </div>
         </div>
@@ -30,5 +39,21 @@ defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
       </div>
     </div>
     """
+  end
+
+  defp tier_label(tier, force_local) do
+    cond do
+      force_local -> "LOCAL OVERRIDE (1.7B)"
+      tier == :judge -> "JUDGE · CLOUD QWEN"
+      true -> "FREE · LOCAL 1.7B"
+    end
+  end
+
+  defp tier_badge_color(tier, force_local) do
+    cond do
+      force_local -> "bg-amber-600"
+      tier == :judge -> "bg-fuchsia-600"
+      true -> "bg-emerald-600"
+    end
   end
 end

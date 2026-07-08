@@ -29,10 +29,16 @@ defmodule Librarian.Curator.LlamaCpp do
 
   @impl true
   def summarize(chunk) when is_list(chunk) do
-    text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
-    {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
+    text =
+      chunk
+      |> Enum.map(& &1.raw_text)
+      |> Enum.join("\n---\n")
+      |> sanitize_for_prompt()
 
-    with {:ok, body} <- chat(prompt),
+    {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
+    url = get_url(chunk)
+
+    with {:ok, body} <- chat(prompt, url),
          {:ok, result} <- parse_result(body) do
       bucket = fallback_bucket(result.bucket, text)
       cleaned = %{result | facts: deduplicate_facts(result.facts, result.summary), bucket: bucket}
@@ -83,6 +89,35 @@ defmodule Librarian.Curator.LlamaCpp do
 
   # --- internals ---
 
+  # Strip markdown structures that confuse small models (tables, code fences,
+  # horizontal rules). We preserve all semantic text — only decoration is
+  # removed. This lets users paste raw README / doc dumps without the 0.6B
+  # model choking on pipe-heavy table rows and returning invalid JSON.
+  defp sanitize_for_prompt(text) do
+    text
+    # Remove markdown code fences but keep the code content inside
+    |> String.replace(~r/```[a-z]*\n?/u, "")
+    # Convert table rows (pipe-delimited) into space-separated tokens
+    |> then(fn current_text ->
+      Regex.replace(~r/^\|(.+)\|$/mu, current_text, fn _, inner ->
+        inner
+        |> String.split("|")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+        # Drop pure alignment rows like |---|---|---|
+        |> Enum.reject(&String.match?(&1, ~r/^[-: ]+$/))
+        |> Enum.join(" ")
+      end)
+    end)
+    # Remove standalone alignment-only rows (---|---|---)
+    |> String.replace(~r/^[|\-: ]+$/mu, "")
+    # Remove HTML tags
+    |> String.replace(~r/<[^>]+>/u, " ")
+    # Collapse runs of blank lines
+    |> String.replace(~r/\n{3,}/u, "\n\n")
+    |> String.trim()
+  end
+
   defp build_prompt(text) do
     """
     You are a structural memory extraction daemon. Respond ONLY with a raw JSON object. Do not wrap the response in markdown, backticks, or markdown code fences (e.g. do not use ```json).
@@ -106,7 +141,17 @@ defmodule Librarian.Curator.LlamaCpp do
     """
   end
 
-  defp chat(prompt) do
+  defp get_url(chunk) do
+    is_consolidation? = Enum.any?(chunk, &(&1.source == "consolidator"))
+
+    if is_consolidation? do
+      Application.get_env(:librarian, :consolidation_llama_cpp_url) || base_url()
+    else
+      base_url()
+    end
+  end
+
+  defp chat(prompt, url) do
     body = %{
       "model" => model_name(),
       "messages" => [%{"role" => "user", "content" => prompt}],
@@ -116,7 +161,7 @@ defmodule Librarian.Curator.LlamaCpp do
     }
 
     case Req.post(req(),
-           url: "#{base_url()}/chat/completions",
+           url: "#{url}/chat/completions",
            json: body,
            receive_timeout: 120_000
          ) do
@@ -155,15 +200,15 @@ defmodule Librarian.Curator.LlamaCpp do
     with content when is_binary(content) <-
            get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-        {:ok,
-         %Librarian.Curator.Result{
-           summary: map["summary"] || "",
-           facts: map["facts"] || [],
-           tags: map["tags"] || [],
-           importance: to_float(map["importance"]),
-           bucket: Librarian.Router.normalize_bucket(map["bucket"]),
-           embedding: nil
-         }}
+      {:ok,
+       %Librarian.Curator.Result{
+         summary: map["summary"] || "",
+         facts: map["facts"] || [],
+         tags: map["tags"] || [],
+         importance: to_float(map["importance"]),
+         bucket: Librarian.Router.normalize_bucket(map["bucket"]),
+         embedding: nil
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

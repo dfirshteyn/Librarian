@@ -16,3 +16,7 @@ config :librarian, :db_dir, "tmp/test_data"
 
 # Use Stub in test to avoid network calls and API keys
 config :librarian, consolidation_curator: Librarian.Curator.Stub
+
+# Free tier curator in test: Stub (no network). Judges still resolve to QwenApi
+# but no test exercises that path with real network calls.
+config :librarian, free_tier_curator: Librarian.Curator.Stub

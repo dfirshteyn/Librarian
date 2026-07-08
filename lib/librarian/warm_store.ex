@@ -130,8 +130,10 @@ defmodule Librarian.WarmStore do
     include_superseded = Keyword.get(opts, :include_superseded, false)
     prefix = user_id <> ":"
 
+    curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
+
     query_embedding =
-      case Librarian.Curator.embed(query) do
+      case Librarian.Curator.embed(query, curator_impl) do
         {:ok, vec} -> vec
         _ -> nil
       end

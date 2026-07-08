@@ -44,8 +44,8 @@ defmodule Librarian do
   end
 
   @doc "Recall memories for a user. Synaptic jumps are cross-bucket within the same user's namespace."
-  def recall(query, user_id \\ @default_user) do
-    warm = WarmStore.recall(query, user_id)
+  def recall(query, user_id \\ @default_user, opts \\ []) do
+    warm = WarmStore.recall(query, user_id, opts)
     warm = Enum.map(warm, fn m -> WarmStore.get(m.id) || m end)
 
     related =
@@ -61,9 +61,11 @@ defmodule Librarian do
           []
       end
 
+    curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
+
     cold =
       if length(warm) < 3 do
-        case Librarian.Curator.embed(query) do
+        case Librarian.Curator.embed(query, curator_impl) do
           {:ok, embedding} ->
             Librarian.ColdStore.search_hybrid(query, embedding, user_id, 5)
 

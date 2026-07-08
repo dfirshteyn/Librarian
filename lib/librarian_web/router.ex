@@ -48,5 +48,6 @@ defmodule LibrarianWeb.Router do
     get("/recall", ApiController, :recall)
     get("/status", ApiController, :status)
     get("/export", ApiController, :export)
+    get("/health/curator", ApiController, :curator_health)
   end
 end

@@ -73,6 +73,43 @@ defmodule LibrarianWeb.ApiController do
   end
 
   @doc """
+  GET /api/health/curator
+  Sends a minimal test payload through the configured curator backend
+  and returns the raw result. Use this to confirm the model is responding
+  correctly before trying to flush real data.
+  """
+  def curator_health(conn, _params) do
+    user_id = get_user_id(conn)
+    curator_impl = Librarian.Curator.resolve_curator(user_id, [])
+
+    test_payload = %Librarian.Capture.Payload{
+      source: "health_check",
+      raw_text: "The server deployed successfully to production at midnight.",
+      occurred_at: DateTime.utc_now(),
+      hint_tags: []
+    }
+
+    result =
+      case Librarian.Curator.summarize([test_payload], curator_impl) do
+        {:ok, r} ->
+          %{
+            ok: true,
+            curator: inspect(curator_impl),
+            summary: r.summary,
+            facts: r.facts,
+            tags: r.tags,
+            bucket: r.bucket,
+            importance: r.importance
+          }
+
+        {:error, reason} ->
+          %{ok: false, curator: inspect(curator_impl), error: inspect(reason)}
+      end
+
+    json(conn, result)
+  end
+
+  @doc """
   GET /api/status
   Returns HOT and WARM tier counts for the requesting user.
   """

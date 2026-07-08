@@ -24,39 +24,54 @@ defmodule Librarian.Flusher do
   at flush time, which is what lets the model override the old ingest-time
   keyword routing.
   """
-  def flush_bucket(bucket) do
+  def flush_bucket(bucket, opts \\ []) do
     case Librarian.HotStore.drain(bucket) do
       [] ->
         :empty
 
       payloads ->
+        require Logger
         user_id = bucket |> String.split(":") |> hd()
+        curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
+
+        Logger.debug("[Flusher] Flushing #{length(payloads)} payloads from #{bucket} via #{inspect(curator_impl)}")
 
         results =
           Enum.map(payloads, fn payload ->
-            case Librarian.Curator.summarize([payload]) do
+            case Librarian.Curator.summarize([payload], curator_impl) do
               {:ok, result} ->
                 result =
-                  case Librarian.Curator.embed(result.summary) do
+                  case Librarian.Curator.embed(result.summary, curator_impl) do
                     {:ok, vec} -> %{result | embedding: vec}
-                    _ -> result
+                    {:error, embed_err} ->
+                      Logger.warning("[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)}, storing without embedding")
+                      result
                   end
 
                 warm_bucket = "#{user_id}:#{result.bucket || "inbox"}"
                 memory = Librarian.WarmStore.put(warm_bucket, result)
+                Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
                 {:ok, memory}
 
               {:error, reason} ->
+                Logger.warning("[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload")
                 # Put this payload back so a curator failure loses nothing.
                 Librarian.HotStore.put(bucket, payload)
                 {:error, reason}
             end
           end)
 
-        Librarian.Wal.truncate(bucket)
+        succeeded = Enum.filter(results, &match?({:ok, _}, &1))
+
+        # Only truncate WAL if at least one payload was successfully curated.
+        # If everything failed the WAL stays intact so payloads survive a restart.
+        if succeeded != [] do
+          Librarian.Wal.truncate(bucket)
+        end
+
         Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket})
 
-        case Enum.filter(results, &match?({:ok, _}, &1)) do
+        case succeeded do
           [] -> {:error, :all_failed}
           ok -> {:ok, Enum.map(ok, fn {:ok, m} -> m end)}
         end
@@ -64,16 +79,16 @@ defmodule Librarian.Flusher do
   end
 
   @doc "Flush every bucket that currently has HOT data."
-  def flush_all(max_concurrency \\ 1) do
+  def flush_all(max_concurrency \\ 1, opts \\ []) do
     buckets = Librarian.HotStore.buckets()
 
     if max_concurrency > 1 do
       buckets
-      |> Task.async_stream(&flush_bucket/1, max_concurrency: max_concurrency, timeout: 60_000)
+      |> Task.async_stream(&flush_bucket(&1, opts), max_concurrency: max_concurrency, timeout: 60_000)
       |> Enum.map(fn {bucket, result} -> {bucket, result} end)
     else
       buckets
-      |> Enum.map(fn bucket -> {bucket, flush_bucket(bucket)} end)
+      |> Enum.map(fn bucket -> {bucket, flush_bucket(bucket, opts)} end)
     end
   end
 

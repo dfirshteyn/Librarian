@@ -22,7 +22,7 @@ defmodule Librarian.Consolidator do
     - `{:merged, from_id, into_id, similarity, preview_a, preview_b}`
     - `{:complete, final_count}` — survivors after all passes
   """
-  def consolidate(user_id) when is_binary(user_id) do
+  def consolidate(user_id, opts \\ []) when is_binary(user_id) do
     memories = Librarian.WarmStore.all_for_user(user_id)
 
     if length(memories) < 2 do
@@ -79,7 +79,7 @@ defmodule Librarian.Consolidator do
         end)
 
       # Persist: write new cluster nodes, supersede originals, archive to COLD
-      persist_clusters(final_clusters, user_id)
+      persist_clusters(final_clusters, user_id, opts)
 
       survivors = Enum.map(final_clusters, fn {mem, _} -> mem end)
 
@@ -239,11 +239,11 @@ defmodule Librarian.Consolidator do
   #   1. Write a new WarmStore entry (so the merged cluster gets a fresh id)
   #   2. Supersede every original memory that was absorbed into this cluster
   #   3. Archive the saved cluster to long-term SQLite ColdStore
-  defp persist_clusters(clusters, user_id) do
-    # Configurable curator for re-curation: defaults to QwenApi in prod,
-    # can be overridden to Stub or LlamaCpp in dev/test for offline friendliness.
-    curator_impl =
-      Application.get_env(:librarian, :consolidation_curator, Librarian.Curator.QwenApi)
+  defp persist_clusters(clusters, user_id, opts) do
+    # Tier-aware re-curation: judges (user_id starts with "judge_") get the
+    # premium Alibaba Cloud Qwen API; free/anon users get the local model.
+    # `force_local` opt lets the dashboard toggle the local model even for judges.
+    curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
 
     Enum.each(clusters, fn {cluster_mem, original_ids} ->
       # Skip clusters that had no merges — the original already lives in WARM

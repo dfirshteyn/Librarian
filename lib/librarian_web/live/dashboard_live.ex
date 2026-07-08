@@ -6,7 +6,6 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.TierBar
   import LibrarianWeb.Dashboard.Components.IngestFeed
   import LibrarianWeb.Dashboard.Components.WarmCards
-  import LibrarianWeb.Dashboard.Components.RecallConsole
   import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
   import LibrarianWeb.Dashboard.Components.InsightsPanel
 
@@ -129,8 +128,18 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
-    tenant_id = generate_tenant_id()
+  def mount(params, _session, socket) do
+    # Allow a tenant id from the URL (?tid=judge_devpost_2026 opens the
+    # premium cloud tier; ?tid=anon_xyz stays on the free local model).
+    # Judges get an "if you know, you know" VIP experience with zero signup.
+    tenant_id =
+      case params do
+        %{"tid" => tid} when is_binary(tid) and byte_size(tid) > 0 -> tid
+        _ -> generate_tenant_id()
+      end
+
+    # Compute the active tier for display (judge_ prefix => premium cloud).
+    tier = if Librarian.Curator.judge?(tenant_id), do: :judge, else: :free
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "ingest")
@@ -143,6 +152,8 @@ defmodule LibrarianWeb.DashboardLive do
      |> stream(:feed, [])
      |> assign(:feed_empty, true)
      |> assign(:tenant_id, tenant_id)
+     |> assign(:tier, tier)
+     |> assign(:force_local, false)
      |> assign(:memories, all_memories(tenant_id))
      |> assign(:hot_counts, hot_counts(tenant_id))
      |> assign(:query, "")
@@ -155,7 +166,10 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:demo_running, false)
      |> assign(:demo_total, 0)
      |> assign(:structured_response, nil)
-     |> assign(:flush_concurrency, Application.get_env(:librarian, :parallel_flush_max_concurrency, 1))}
+     |> assign(
+       :flush_concurrency,
+       Application.get_env(:librarian, :parallel_flush_max_concurrency, 1)
+     )}
   end
 
   # ── PubSub handlers ─────────────────────────────────────────────────
@@ -182,6 +196,7 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info({:flushed, _bucket}, socket) do
     tid = socket.assigns.tenant_id
+
     {:noreply,
      socket
      |> assign(:memories, all_memories(tid))
@@ -191,6 +206,7 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info(:refresh_warm, socket) do
     tid = socket.assigns.tenant_id
+
     {:noreply,
      socket
      |> assign(:memories, all_memories(tid))
@@ -208,30 +224,31 @@ defmodule LibrarianWeb.DashboardLive do
     case String.split(String.trim(cmd)) do
       ["/model" | query_parts] ->
         query = Enum.join(query_parts, " ")
-        results = Librarian.recall(query, tid)
+        results = Librarian.recall(query, tid, force_local: socket.assigns.force_local)
 
         response = %{
           type: "model_recall",
           query: query,
           count: length(results.warm),
-          memories: Enum.map(results.warm, fn m ->
-            %{
-              id: m.id,
-              bucket: m.bucket,
-              summary: m.summary,
-              facts: m.facts || [],
-              tags: m.tags || [],
-              importance: m.importance,
-              created: DateTime.to_iso8601(m.created_at)
-            }
-          end)
+          memories:
+            Enum.map(results.warm, fn m ->
+              %{
+                id: m.id,
+                bucket: m.bucket,
+                summary: m.summary,
+                facts: m.facts || [],
+                tags: m.tags || [],
+                importance: m.importance,
+                created: DateTime.to_iso8601(m.created_at)
+              }
+            end)
         }
 
         {:noreply, assign(socket, :structured_response, response)}
 
       ["/recall" | query_parts] ->
         query = Enum.join(query_parts, " ")
-        results = Librarian.recall(query, tid)
+        results = Librarian.recall(query, tid, force_local: socket.assigns.force_local)
 
         response = %{
           type: "search_recall",
@@ -250,7 +267,11 @@ defmodule LibrarianWeb.DashboardLive do
         {:noreply, assign(socket, :structured_response, response)}
 
       _ ->
-        response = %{type: "error", message: "Unknown command. Use /model [query], /recall [query], or /status"}
+        response = %{
+          type: "error",
+          message: "Unknown command. Use /model [query], /recall [query], or /status"
+        }
+
         {:noreply, assign(socket, :structured_response, response)}
     end
   end
@@ -260,8 +281,10 @@ defmodule LibrarianWeb.DashboardLive do
   @impl true
   def handle_event("recall", %{"query" => q}, socket) when byte_size(q) > 0 do
     tid = socket.assigns.tenant_id
-    results = Librarian.recall(q, tid)
-    {:noreply, assign(socket, :recall_results, %{query: q, warm: results.warm, related: results.related})}
+    results = Librarian.recall(q, tid, force_local: socket.assigns.force_local)
+
+    {:noreply,
+     assign(socket, :recall_results, %{query: q, warm: results.warm, related: results.related})}
   end
 
   def handle_event("recall", _params, socket) do
@@ -269,7 +292,7 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   def handle_event("flush_all", _params, socket) do
-    Flusher.flush_all(socket.assigns.flush_concurrency)
+    Flusher.flush_all(socket.assigns.flush_concurrency, force_local: socket.assigns.force_local)
     tid = socket.assigns.tenant_id
 
     {:noreply,
@@ -282,9 +305,10 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_event("nightly_pass", _params, socket) do
     concurrency = socket.assigns.flush_concurrency
+    force_local = socket.assigns.force_local
 
     Task.start(fn ->
-      Flusher.flush_all(concurrency)
+      Flusher.flush_all(concurrency, force_local: force_local)
       Flusher.nightly_pass()
       Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all})
     end)
@@ -297,21 +321,54 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, assign(socket, :flush_concurrency, concurrency)}
   end
 
-  def handle_event("manual_ingest", %{"text" => text, "bucket" => bucket}, socket) when byte_size(text) > 0 do
+  # Toggle: force the local 1.7B model even for judge accounts (lets you
+  # show the speed/clarity difference side-by-side during the demo).
+  def handle_event("toggle_force_local", _params, socket) do
+    {:noreply, assign(socket, :force_local, not socket.assigns.force_local)}
+  end
+
+  # Force an explicit consolidation sweep using the tier-resolved curator.
+  # Judges (and anyone not forcing local) get the premium cloud re-curation;
+  # free tier uses the local model. This is the same engine the background
+  # AutomationServer polls on, just triggered on-demand from the dashboard.
+  def handle_event("force_consolidation", _params, socket) do
+    tid = socket.assigns.tenant_id
+    force_local = socket.assigns.force_local
+
+    Task.start(fn ->
+      Librarian.Consolidator.consolidate(tid, force_local: force_local)
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
+    end)
+
+    {:noreply, put_flash(socket, :info, "Consolidation sweep started for #{tid}")}
+  end
+
+  def handle_event("manual_ingest", %{"text" => text, "bucket" => bucket}, socket)
+      when byte_size(text) > 0 do
     tid = socket.assigns.tenant_id
 
-    case Librarian.ingest(%{
-      "source" => "web_ui",
-      "raw_text" => text,
-      "hint_tags" => [],
-      "metadata" => %{}
-    }, tid) do
+    case Librarian.IngestRouter.process(
+           %{
+             "source" => "web_ui",
+             "raw_text" => text,
+             "hint_tags" => [],
+             "metadata" => %{}
+           },
+           tid
+         ) do
       {:ok, _} ->
         {:noreply,
          socket
          |> assign(:ingest_text, "")
          |> assign(:ingest_bucket, bucket)
          |> put_flash(:info, "Ingested to #{bucket}")}
+
+      {:ok, _, chunk_count} ->
+        {:noreply,
+         socket
+         |> assign(:ingest_text, "")
+         |> assign(:ingest_bucket, bucket)
+         |> put_flash(:info, "Ingested (auto-chunked into #{chunk_count} pieces) to #{bucket}")}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Ingest failed: #{inspect(reason)}")}
@@ -324,15 +381,17 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_event("toggle_memory", %{"id" => id}, socket) do
     id = String.to_integer(id)
-    new_set = if MapSet.member?(socket.assigns.expanded_memories, id),
-      do: MapSet.delete(socket.assigns.expanded_memories, id),
-      else: MapSet.put(socket.assigns.expanded_memories, id)
+
+    new_set =
+      if MapSet.member?(socket.assigns.expanded_memories, id),
+        do: MapSet.delete(socket.assigns.expanded_memories, id),
+        else: MapSet.put(socket.assigns.expanded_memories, id)
 
     {:noreply, assign(socket, :expanded_memories, new_set)}
   end
 
   def handle_event("flush_bucket", %{"bucket" => bucket}, socket) do
-    case Librarian.Flusher.flush_bucket(bucket) do
+    case Librarian.Flusher.flush_bucket(bucket, force_local: socket.assigns.force_local) do
       {:ok, _} ->
         Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket})
         {:noreply, put_flash(socket, :info, "Flushed #{bucket}")}
@@ -350,15 +409,23 @@ defmodule LibrarianWeb.DashboardLive do
 
       Task.start(fn ->
         1..100
-        |> Task.async_stream(fn i ->
-          text = Enum.random(@demo_texts)
-          Librarian.ingest(%{
-            "source" => "flood",
-            "raw_text" => text,
-            "hint_tags" => [],
-            "metadata" => %{"flood_index" => i}
-          }, tid)
-        end, max_concurrency: 8, timeout: 60_000)
+        |> Task.async_stream(
+          fn i ->
+            text = Enum.random(@demo_texts)
+
+            Librarian.ingest(
+              %{
+                "source" => "flood",
+                "raw_text" => text,
+                "hint_tags" => [],
+                "metadata" => %{"flood_index" => i}
+              },
+              tid
+            )
+          end,
+          max_concurrency: 8,
+          timeout: 60_000
+        )
         |> Enum.each(fn _ -> :ok end)
 
         Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", demo_running: false)
@@ -380,15 +447,24 @@ defmodule LibrarianWeb.DashboardLive do
 
       Task.start(fn ->
         1..total
-        |> Task.async_stream(fn i ->
-          text = Enum.random(@demo_texts)
-          Librarian.ingest(%{
-            "source" => "swarm_agent_#{i}",
-            "raw_text" => text,
-            "hint_tags" => [],
-            "metadata" => %{"swarm_index" => i}
-          }, tid)
-        end, max_concurrency: 50, timeout: 120_000, ordered: false)
+        |> Task.async_stream(
+          fn i ->
+            text = Enum.random(@demo_texts)
+
+            Librarian.ingest(
+              %{
+                "source" => "swarm_agent_#{i}",
+                "raw_text" => text,
+                "hint_tags" => [],
+                "metadata" => %{"swarm_index" => i}
+              },
+              tid
+            )
+          end,
+          max_concurrency: 50,
+          timeout: 120_000,
+          ordered: false
+        )
         |> Enum.to_list()
 
         Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", demo_running: false)
@@ -455,18 +531,40 @@ defmodule LibrarianWeb.DashboardLive do
     ~H"""
     <div class="min-h-screen bg-gray-950 text-gray-100 font-mono p-4">
       <.header token_savings={@token_savings} flush_concurrency={@flush_concurrency} demo_running={@demo_running} demo_total={@demo_total} />
-      <.tenant_banner tenant_id={@tenant_id} />
+      <.tenant_banner tenant_id={@tenant_id} tier={@tier} force_local={@force_local} />
       <.tier_bar hot_counts={@hot_counts} memories={@memories} tenant_id={@tenant_id} />
+
+      <div class="flex gap-2 mb-4 items-center">
+        <button phx-click="force_consolidation"
+          class="text-xs bg-fuchsia-700 hover:bg-fuchsia-600 text-white px-3 py-1.5 rounded font-bold transition">
+          ⚡ Force Consolidation Sweep
+        </button>
+
+        <%= if @tier == :judge do %>
+          <%# Judges can switch between Cloud Qwen API and Local 1.7B %>
+          <button phx-click="toggle_force_local"
+            class={"text-xs px-3 py-1.5 rounded font-bold transition border " <>
+              if(@force_local,
+                do: "bg-amber-600 hover:bg-amber-500 text-white border-amber-400",
+                else: "bg-violet-700 hover:bg-violet-600 text-white border-violet-500")}>
+            <%= if @force_local, do: "🖥️ Local 1.7B Active", else: "☁️ Cloud Qwen API Active" %>
+          </button>
+        <% else %>
+          <%# Free/anon users always use the local model — no toggle visible %>
+          <span class="text-xs text-gray-600 px-2 py-1.5 rounded border border-gray-800 select-none">
+            🖥️ Local Model
+          </span>
+        <% end %>
+      </div>
 
       <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 160px);">
         <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} />
         <.warm_cards tenant_id={@tenant_id} memories={@memories} expanded_memories={@expanded_memories} />
-        <.recall_console tenant_id={@tenant_id} query={@query} recall_results={@recall_results} />
+        <.insights_panel insights={@insights} />
       </div>
 
       <div class="grid grid-cols-2 gap-4" style="height: calc(50vh - 160px);">
         <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} />
-        <.insights_panel insights={@insights} />
       </div>
     </div>
     """

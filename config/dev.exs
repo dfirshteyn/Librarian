@@ -33,3 +33,12 @@ config :librarian, llama_cpp_timeout_ms: 120_000
 
 # Consolidation curator: use Stub in dev so we don't need API keys locally
 config :librarian, consolidation_curator: Librarian.Curator.Stub
+
+# Free/anon users get the local LlamaCpp model for flush & recall.
+# Judges (user_id prefix "judge_") route to cloud Qwen API unless force_local is set.
+config :librarian, free_tier_curator: Librarian.Curator.LlamaCpp
+
+# Port 1236: dedicated Qwen 1.7B model for consolidation re-curation synthesis.
+# Port 1234: 0.6B classifier (fast ingest/extraction, not used for consolidation).
+# If 1236 is not up, falls back to port 1234 automatically.
+config :librarian, consolidation_llama_cpp_url: "http://localhost:1236/v1"
