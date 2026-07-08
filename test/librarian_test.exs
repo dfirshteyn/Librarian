@@ -309,8 +309,11 @@ defmodule Librarian.FlusherSupersessionTest do
     :ok
   end
 
-  test "flushing a contradicting decision in a :supersede bucket auto-supersedes the prior one" do
-    # Ingest lands in local:inbox (HOT buffer); flush routes to curator bucket.
+  test "flusher is a pure write path — does NOT supersede inline (consolidator handles that)" do
+    # The flusher no longer calls maybe_supersede inline. Supersession is now
+    # the consolidator's job (async tournament bracket with semantic similarity).
+    # This test verifies the flusher writes both memories cleanly without
+    # creating daisy-chain supersession entries.
     Librarian.ingest(%{
       "source" => "test",
       "raw_text" => "we decided to deploy using the postgres database for the project"
@@ -325,11 +328,13 @@ defmodule Librarian.FlusherSupersessionTest do
 
     {:ok, [second]} = Librarian.Flusher.flush_bucket("local:inbox")
 
-    # Both land in the curator-chosen project WARM bucket and supersede.
+    # Both land in the curator-chosen project WARM bucket.
     assert first.bucket == "local:project"
     assert second.bucket == "local:project"
+
+    # No inline supersession happens — the first memory is NOT flagged.
     reloaded_first = Librarian.WarmStore.all() |> Enum.find(&(&1.id == first.id))
-    assert reloaded_first.superseded_by == second.id
+    assert is_nil(reloaded_first.superseded_by)
   end
 end
 

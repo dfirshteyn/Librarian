@@ -254,6 +254,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:swarm_started_at, nil)
      |> assign(:valid_users, @valid_users)
      |> assign(:personas, @personas)
+     |> assign(:structured_response, nil)
      |> assign(:flush_concurrency, Application.get_env(:librarian, :parallel_flush_max_concurrency, 1))
      |> assign(:flood_total, 100)}
   end
@@ -302,6 +303,62 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:hot_counts, hot_counts(selected))
      |> assign(:insights, Librarian.morning_briefing(20))
      |> assign(:token_savings, compute_token_savings())}
+  end
+
+  @impl true
+  def handle_event("structured_recall", %{"command" => cmd}, socket) do
+    user = socket.assigns.selected_user
+
+    # Parse commands
+    case String.split(String.trim(cmd)) do
+      ["/model" | query_parts] ->
+        query = Enum.join(query_parts, " ")
+        results = Librarian.recall(query, user)
+
+        # Return structured facts
+        response = %{
+          type: "model_recall",
+          query: query,
+          count: length(results.warm),
+          memories: Enum.map(results.warm, fn m ->
+            %{
+              id: m.id,
+              bucket: m.bucket,
+              summary: m.summary,
+              facts: m.facts || [],
+              tags: m.tags || [],
+              importance: m.importance,
+              created: DateTime.to_iso8601(m.created_at)
+            }
+          end)
+        }
+
+        {:noreply, assign(socket, :structured_response, response)}
+
+      ["/recall" | query_parts] ->
+        query = Enum.join(query_parts, " ")
+        results = Librarian.recall(query, user)
+
+        response = %{
+          type: "search_recall",
+          query: query,
+          warm_count: length(results.warm),
+          related_count: length(results.related),
+          warm: Enum.take(Enum.map(results.warm, & &1.summary), 5),
+          related: Enum.take(Enum.map(results.related, & &1.summary), 3)
+        }
+
+        {:noreply, assign(socket, :structured_response, response)}
+
+      ["/status"] ->
+        status = Librarian.status(user)
+        response = %{type: "status", data: Map.delete(status, [:user_id])}
+        {:noreply, assign(socket, :structured_response, response)}
+
+      _ ->
+        response = %{type: "error", message: "Unknown command. Use /model [query], /recall [query], or /status"}
+        {:noreply, assign(socket, :structured_response, response)}
+    end
   end
 
   # ── Event handlers ──────────────────────────────────────────────────
@@ -763,7 +820,8 @@ defmodule LibrarianWeb.DashboardLive do
         <% end %>
       </div>
 
-      <div class="grid grid-cols-4 gap-4 h-[calc(100vh-280px)]">
+      <%!-- Top row: 3 columns — Ingest, WARM, Recall --%>
+      <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 160px);">
 
         <%!-- Left: live ingest feed --%>
         <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
@@ -931,8 +989,132 @@ defmodule LibrarianWeb.DashboardLive do
             <% end %>
           </div>
         </div>
+      </div>
 
-        <%!-- Fourth: Connections / Insights panel --%>
+      <%!-- Bottom row: 2 columns — Structured Recall, Insights --%>
+      <div class="grid grid-cols-2 gap-4" style="height: calc(50vh - 160px);">
+
+        <%!-- Structured Recall terminal --%>
+        <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col border border-green-800">
+          <h2 class="text-sm font-bold text-green-300 mb-3 uppercase tracking-wider">
+            💻 Structured Recall
+            <span class="text-green-600 text-[10px]">/model /recall /status</span>
+            <span :if={@selected_user != "manager"} class="text-amber-400 text-[10px]">[<%= @selected_user %>]</span>
+          </h2>
+          <form phx-submit="structured_recall" class="mb-3">
+            <div class="flex gap-2">
+              <span class="text-green-400 text-sm font-bold">$&gt;</span>
+              <input type="text" name="command"
+                placeholder="/model database performance | /recall deploy | /status"
+                class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
+              <button type="submit"
+                class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
+                Run
+              </button>
+            </div>
+          </form>
+
+          <div class="flex-1 overflow-y-auto bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs">
+            <%= if @structured_response do %>
+              <%= case @structured_response.type do %>
+                <% "model_recall" -> %>
+                  <div>
+                    <p class="text-green-400 mb-2">
+                      <span class="text-green-600">MATCHES:</span>
+                      <%= @structured_response.count %> memories for "<%= @structured_response.query %>"
+                    </p>
+                    <%= for mem <- @structured_response.memories do %>
+                      <div class="bg-gray-900 rounded p-2 mb-2 border-l-2 border-green-500">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(mem.bucket, @bucket_colors)}"} />
+                          <span class="text-gray-200 font-bold"><%= mem.bucket %></span>
+                          <span class="text-gray-500">#<%= mem.id %></span>
+                          <span class="text-gray-500 ml-auto">imp=<%= Float.round(mem.importance, 2) %></span>
+                        </div>
+                        <p class="text-gray-300 mb-1"><%= mem.summary %></p>
+                        <%= if mem.facts != [] do %>
+                          <ul class="text-gray-400 space-y-0.5 list-none">
+                            <%= for fact <- mem.facts do %>
+                              <li>• <%= fact %></li>
+                            <% end %>
+                          </ul>
+                        <% end %>
+                        <div class="flex gap-1 mt-1">
+                          <%= for tag <- mem.tags do %>
+                            <span class="bg-gray-800 text-gray-400 rounded px-1 py-0.5 text-[10px]"><%= tag %></span>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+
+                <% "search_recall" -> %>
+                  <div>
+                    <p class="text-cyan-400 mb-2">
+                      <span class="text-cyan-600">SEARCH:</span>
+                      <%= @structured_response.warm_count %> warm, <%= @structured_response.related_count %> related for "<%= @structured_response.query %>"
+                    </p>
+                    <%= if @structured_response.warm != [] do %>
+                      <p class="text-gray-500 mb-1">WARM (top 5):</p>
+                      <ul class="text-gray-300 space-y-1">
+                        <%= for s <- @structured_response.warm do %>
+                          <li>• <%= s %></li>
+                        <% end %>
+                      </ul>
+                    <% end %>
+                    <%= if @structured_response.related != [] do %>
+                      <p class="text-yellow-500 mb-1 mt-2">SYNAPTIC JUMPS:</p>
+                      <ul class="text-yellow-300 space-y-1">
+                        <%= for s <- @structured_response.related do %>
+                          <li>• <%= s %></li>
+                        <% end %>
+                      </ul>
+                    <% end %>
+                  </div>
+
+                <% "status" -> %>
+                  <div>
+                    <p class="text-amber-400 mb-2">
+                      <span class="text-amber-600">STATUS:</span> <%= @selected_user %>
+                    </p>
+                    <%= for {bucket, count} <- Enum.sort(Map.to_list(@structured_response.data.hot || %{})) do %>
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(bucket, @bucket_colors)}"} />
+                        <span class="text-gray-300"><%= bucket %>: <%= count %> HOT</span>
+                      </div>
+                    <% end %>
+                    <p class="text-gray-300 mt-2">WARM total: <%= @structured_response.data.warm_count %></p>
+                  </div>
+
+                <% "error" -> %>
+                  <p class="text-red-400">
+                    <span class="text-red-600">ERROR:</span> <%= @structured_response.message %>
+                  </p>
+
+                <% _ -> %>
+                  <p class="text-gray-500">Unknown response type</p>
+              <% end %>
+            <% else %>
+              <p class="text-gray-600">
+                Memory as a database. Type a command:
+              </p>
+              <ul class="text-gray-600 mt-2 space-y-1">
+                <li><span class="text-green-600">/model [query]</span> — structured facts from matching memories</li>
+                <li><span class="text-cyan-600">/recall [query]</span> — search summaries with synaptic jumps</li>
+                <li><span class="text-amber-600">/status</span> — tier counts for current user</li>
+              </ul>
+              <p class="text-gray-700 mt-3 text-[10px]">
+                <%= if @selected_user == "manager" do %>
+                  Manager queries across all tenants. Switch to a dev for isolated results.
+                <% else %>
+                  Queries isolated to <%= @selected_user %>. Manager sees everything.
+                <% end %>
+              </p>
+            <% end %>
+          </div>
+        </div>
+
+        <%!-- Connections / Insights panel --%>
         <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
           <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
             🔗 Connections & Insights

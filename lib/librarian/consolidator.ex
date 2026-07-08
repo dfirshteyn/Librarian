@@ -240,33 +240,66 @@ defmodule Librarian.Consolidator do
   #   2. Supersede every original memory that was absorbed into this cluster
   #   3. Archive the saved cluster to long-term SQLite ColdStore
   defp persist_clusters(clusters, user_id) do
-    IO.inspect(clusters, label: "[Persist Phase] Processing Final Clusters")
+    # Configurable curator for re-curation: defaults to QwenApi in prod,
+    # can be overridden to Stub or LlamaCpp in dev/test for offline friendliness.
+    curator_impl =
+      Application.get_env(:librarian, :consolidation_curator, Librarian.Curator.QwenApi)
 
     Enum.each(clusters, fn {cluster_mem, original_ids} ->
       # Skip clusters that had no merges — the original already lives in WARM
       if length(original_ids) <= 1 do
         :ok
       else
-        # Write the merged cluster as a new WARM entry
-        curator_result = %Librarian.Curator.Result{
-          summary: cluster_mem.summary,
-          facts: cluster_mem.facts,
-          tags: cluster_mem.tags,
-          importance: cluster_mem.importance,
-          embedding: cluster_mem.embedding
+        # 1. Reconstruct clean, uncorrupted individual summaries directly from WARM
+        combined_text =
+          [cluster_mem.id | original_ids]
+          |> Enum.flat_map(fn id ->
+            case Librarian.WarmStore.get(id) do
+              nil -> []
+              m -> [m.summary]
+            end
+          end)
+          |> Enum.uniq()
+          |> Enum.join("\n")
+
+        payload = %Librarian.Capture.Payload{
+          source: "consolidator",
+          raw_text: combined_text
         }
 
-        saved = Librarian.WarmStore.put(cluster_mem.bucket, curator_result)
+        # 2. Run synthesis through the configured curator engine
+        case curator_impl.summarize([payload]) do
+          {:ok, curated} ->
+            # 3. Assemble a pristine Result struct with correctly isolated bucket context
+            curator_result = %Librarian.Curator.Result{
+              summary: curated.summary,
+              facts: curated.facts,
+              tags: curated.tags,
+              importance: curated.importance,
+              bucket: cluster_mem.bucket |> String.split(":") |> List.last(),
+              embedding: nil
+            }
 
-        # Supersede all originals (keeper + absorbed) with the new cluster id
-        all_originals = Enum.uniq([cluster_mem.id | original_ids])
+            # 4. Atomic storage, cross-linking, and cold-storage archival
+            saved = Librarian.WarmStore.put(cluster_mem.bucket, curator_result)
 
-        Enum.each(all_originals, fn orig_id ->
-          Librarian.WarmStore.supersede(orig_id, saved.id)
-        end)
+            all_originals = Enum.uniq([cluster_mem.id | original_ids])
 
-        # Hand the dense cluster off to ColdStore
-        Librarian.ColdStore.archive(saved, user_id)
+            Enum.each(all_originals, fn orig_id ->
+              Librarian.WarmStore.supersede(orig_id, saved.id)
+            end)
+
+            Librarian.ColdStore.archive(saved, user_id)
+
+          {:error, reason} ->
+            require Logger
+
+            Logger.warning(
+              "Consolidation re-curation failed via #{inspect(curator_impl)}, skipping cluster. Reason: #{inspect(reason)}"
+            )
+
+            :ok
+        end
       end
     end)
   end

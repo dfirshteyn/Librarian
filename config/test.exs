@@ -16,3 +16,6 @@ config :librarian, LibrarianWeb.Endpoint,
 config :librarian, :start_ws_server, false
 
 config :librarian, :db_dir, "tmp/test_data"
+
+# Use Stub in test to avoid network calls and API keys
+config :librarian, consolidation_curator: Librarian.Curator.Stub

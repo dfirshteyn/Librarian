@@ -50,7 +50,6 @@ defmodule Librarian.Flusher do
 
                 warm_bucket = "#{user_id}:#{result.bucket || "inbox"}"
                 memory = Librarian.WarmStore.put(warm_bucket, result)
-                maybe_supersede(memory)
                 {:ok, memory}
 
               {:error, reason} ->
