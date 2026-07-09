@@ -11,7 +11,7 @@ defmodule Librarian.Consolidator do
   memories are flagged as superseded in the WarmStore.
   """
 
-  @similarity_threshold 0.75
+  @similarity_threshold 0.88
 
   @doc ~S"""
   Run a full consolidation pass for a user.

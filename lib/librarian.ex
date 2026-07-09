@@ -101,7 +101,10 @@ defmodule Librarian do
     %{
       user_id: user_id,
       hot: Map.new(buckets, fn b -> {b, HotStore.count(b)} end),
-      warm_count: WarmStore.all() |> Enum.count(&String.starts_with?(&1.bucket, prefix))
+      warm_count:
+        WarmStore.all()
+        |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+        |> Enum.count(&is_nil(&1.superseded_by))
     }
   end
 

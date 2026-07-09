@@ -79,6 +79,19 @@ defmodule Librarian.WarmStore do
     |> Enum.reject(& &1.superseded_by)
   end
 
+  @doc """
+  Count how many memories for a user have been superseded (merged into a
+  newer consolidated memory). Used by the dashboard to show \"N merged\" so
+  the consolidation history is visible without cluttering the active list.
+  """
+  def superseded_count_for_user(user_id) do
+    prefix = user_id <> ":"
+
+    all()
+    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+    |> Enum.count(& &1.superseded_by)
+  end
+
   def by_bucket(bucket) do
     all() |> Enum.filter(&(&1.bucket == bucket))
   end

@@ -102,17 +102,23 @@ defmodule Librarian.Consolidation.AutomationServer do
     Process.send_after(self(), :poll, poll_ms)
   end
 
+  # Users that should never be auto-consolidated (dev/iex leftovers)
+  @skip_user_ids ~w(local)
+
   defp check_and_spawn(state) do
     min_memories =
       Application.get_env(:librarian, :consolidation_min_memories, @default_min_memories)
 
     all_memories = Librarian.WarmStore.all()
 
-    # Find all unique user_ids with enough active memories
+    # Find all unique user_ids with enough active (non-superseded) memories.
+    # Skip the "local" default user — it accumulates leftover iex/dev session
+    # data and would trigger spurious sweeps during demos.
     user_ids =
       all_memories
       |> Enum.map(fn m -> m.bucket |> String.split(":") |> hd() end)
       |> Enum.uniq()
+      |> Enum.reject(&(&1 in @skip_user_ids))
       |> Enum.filter(fn uid ->
         not MapSet.member?(state.in_progress, uid) and
           Enum.count(all_memories, fn m ->

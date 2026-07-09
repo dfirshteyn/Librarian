@@ -42,3 +42,8 @@ config :librarian, free_tier_curator: Librarian.Curator.LlamaCpp
 # Port 1234: 0.6B classifier (fast ingest/extraction, not used for consolidation).
 # If 1236 is not up, falls back to port 1234 automatically.
 config :librarian, consolidation_llama_cpp_url: "http://localhost:1236/v1"
+
+# Demo: require at least 6 active memories before the background AutomationServer
+# fires a consolidation sweep. This gives you time to SHOW the 6 warm memory cards
+# before they collapse. Use ⚡ Force Consolidation for on-demand sweeps during demos.
+config :librarian, consolidation_min_memories: 6

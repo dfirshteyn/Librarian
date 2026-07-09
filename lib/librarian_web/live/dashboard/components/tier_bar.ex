@@ -6,6 +6,7 @@ defmodule LibrarianWeb.Dashboard.Components.TierBar do
   attr :hot_counts, :map, required: true
   attr :memories, :list, required: true
   attr :tenant_id, :string, required: true
+  attr :superseded_count, :integer, default: 0
 
   def tier_bar(assigns) do
     ~H"""
@@ -23,6 +24,12 @@ defmodule LibrarianWeb.Dashboard.Components.TierBar do
         <span class="text-xs text-gray-300">WARM</span>
         <span class="text-xs font-bold text-white"><%= length(@memories) %></span>
       </div>
+      <%= if @superseded_count > 0 do %>
+        <div class="flex items-center gap-2 bg-purple-950/40 rounded px-3 py-1.5 border border-purple-800/40">
+          <span class="text-xs text-purple-300">🧬 merged</span>
+          <span class="text-xs font-bold text-purple-200"><%= @superseded_count %></span>
+        </div>
+      <% end %>
       <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
         <span class="text-xs text-gray-300">🔢 embedded</span>
         <span class="text-xs font-bold text-white"><%= Enum.count(@memories, &(not is_nil(&1.embedding))) %></span>

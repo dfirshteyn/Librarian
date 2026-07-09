@@ -154,7 +154,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:tenant_id, tenant_id)
      |> assign(:tier, tier)
      |> assign(:force_local, false)
-     |> assign(:memories, all_memories(tenant_id))
+     |> assign_memories(tenant_id)
      |> assign(:hot_counts, hot_counts(tenant_id))
      |> assign(:query, "")
      |> assign(:recall_results, nil)
@@ -199,7 +199,7 @@ defmodule LibrarianWeb.DashboardLive do
 
     {:noreply,
      socket
-     |> assign(:memories, all_memories(tid))
+     |> assign_memories(tid)
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:token_savings, compute_token_savings(tid))}
   end
@@ -209,7 +209,7 @@ defmodule LibrarianWeb.DashboardLive do
 
     {:noreply,
      socket
-     |> assign(:memories, all_memories(tid))
+     |> assign_memories(tid)
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:insights, Librarian.morning_briefing(20))
      |> assign(:token_savings, compute_token_savings(tid))}
@@ -297,7 +297,7 @@ defmodule LibrarianWeb.DashboardLive do
 
     {:noreply,
      socket
-     |> assign(:memories, all_memories(tid))
+     |> assign_memories(tid)
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:token_savings, compute_token_savings(tid))
      |> put_flash(:info, "Flushed all buckets")}
@@ -479,6 +479,12 @@ defmodule LibrarianWeb.DashboardLive do
 
   # ── Helpers ─────────────────────────────────────────────────────────
 
+  defp assign_memories(socket, tenant_id) do
+    socket
+    |> assign(:memories, all_memories(tenant_id))
+    |> assign(:superseded_count, WarmStore.superseded_count_for_user(tenant_id))
+  end
+
   defp all_memories(tenant_id) do
     WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
   end
@@ -532,7 +538,7 @@ defmodule LibrarianWeb.DashboardLive do
     <div class="min-h-screen bg-gray-950 text-gray-100 font-mono p-4">
       <.header token_savings={@token_savings} flush_concurrency={@flush_concurrency} demo_running={@demo_running} demo_total={@demo_total} />
       <.tenant_banner tenant_id={@tenant_id} tier={@tier} force_local={@force_local} />
-      <.tier_bar hot_counts={@hot_counts} memories={@memories} tenant_id={@tenant_id} />
+      <.tier_bar hot_counts={@hot_counts} memories={@memories} tenant_id={@tenant_id} superseded_count={@superseded_count} />
 
       <div class="flex gap-2 mb-4 items-center">
         <button phx-click="force_consolidation"
@@ -541,7 +547,7 @@ defmodule LibrarianWeb.DashboardLive do
         </button>
 
         <%= if @tier == :judge do %>
-          <%# Judges can switch between Cloud Qwen API and Local 1.7B %>
+          <%!-- Judges can switch between Cloud Qwen API and Local 1.7B --%>
           <button phx-click="toggle_force_local"
             class={"text-xs px-3 py-1.5 rounded font-bold transition border " <>
               if(@force_local,
@@ -550,7 +556,7 @@ defmodule LibrarianWeb.DashboardLive do
             <%= if @force_local, do: "🖥️ Local 1.7B Active", else: "☁️ Cloud Qwen API Active" %>
           </button>
         <% else %>
-          <%# Free/anon users always use the local model — no toggle visible %>
+          <%!-- Free/anon users always use the local model — no toggle visible --%>
           <span class="text-xs text-gray-600 px-2 py-1.5 rounded border border-gray-800 select-none">
             🖥️ Local Model
           </span>
