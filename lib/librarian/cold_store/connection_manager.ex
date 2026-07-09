@@ -54,6 +54,22 @@ defmodule Librarian.ColdStore.ConnectionManager do
       INSERT INTO memory_fts(rowid, summary, facts, tags)
       VALUES (new.id, new.summary, new.facts, new.tags);
     END
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_relationships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      relationship_type TEXT NOT NULL,
+      metadata_json TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_rel_src ON memory_relationships(source_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_rel_tgt ON memory_relationships(target_id)
     """
   ]
 

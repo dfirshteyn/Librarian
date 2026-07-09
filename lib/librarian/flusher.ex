@@ -155,6 +155,16 @@ defmodule Librarian.Flusher do
     Enum.each(actions[:supersessions] || [], fn %{"old_id" => old_id, "new_id" => new_id} ->
       Librarian.WarmStore.supersede(old_id, new_id)
 
+      # Also log to relationships table for audit trail
+      user_id = extract_user_id_from_memory_id(old_id)
+      Librarian.ColdStore.log_relationship(
+        to_string(old_id),
+        to_string(new_id),
+        "superseded_by",
+        user_id,
+        %{}
+      )
+
       Librarian.ColdStore.log_insight(%{
         "kind" => "deep_supersession",
         "old_id" => old_id,
@@ -174,7 +184,7 @@ defmodule Librarian.Flusher do
       end
     end)
 
-    # Log cross-connections as insights
+    # Log cross-connections as insights AND relationships
     Enum.each(actions[:cross_connections] || [], fn conn ->
       Librarian.ColdStore.log_insight(%{
         "kind" => "deep_cross_connection",
@@ -182,6 +192,16 @@ defmodule Librarian.Flusher do
         "id_b" => conn["id_b"],
         "note" => conn["note"]
       })
+
+      # Also log to relationships table
+      user_id = extract_user_id_from_memory_id(conn["id_a"])
+      Librarian.ColdStore.log_relationship(
+        conn["id_a"],
+        conn["id_b"],
+        "cross_connected",
+        user_id,
+        %{note: conn["note"]}
+      )
     end)
 
     # Apply new tags
@@ -195,5 +215,13 @@ defmodule Librarian.Flusher do
           :ets.insert(Librarian.WarmStore, {id, updated})
       end
     end)
+  end
+
+  # Extract user_id from memory - need to look up the memory to find its bucket
+  defp extract_user_id_from_memory_id(id) do
+    case Librarian.WarmStore.get(id) do
+      nil -> "unknown"
+      memory -> memory.bucket |> String.split(":") |> hd()
+    end
   end
 end

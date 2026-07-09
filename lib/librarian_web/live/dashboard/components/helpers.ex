@@ -19,6 +19,7 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
 
   def tenant_short(tenant_id), do: String.slice(tenant_id, 10, 6)
 
+  # ── Insight Icons ────────────────────────────────────────────────────
   def insight_icon("supersession"), do: "🔄"
   def insight_icon("deep_supersession"), do: "⚠️"
   def insight_icon("deep_cross_connection"), do: "🔗"
@@ -34,4 +35,16 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
     do: "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
 
   def insight_summary(m), do: inspect(m)
+
+  # ── Relationship Badges ───────────────────────────────────────────────
+
+  @doc """
+  Returns distinct badges for memory relationship types.
+  Used in warm_cards lineage display.
+  """
+  def relationship_badge("merged_into"), do: "🛠️ Merged"
+  def relationship_badge("superseded_by"), do: "🔁 Superseded"
+  def relationship_badge("cross_connected"), do: "🌙 Cross-Connect"
+  def relationship_badge("derived_from"), do: "🌙 Derived"
+  def relationship_badge(_type), do: "🔗 Link"
 end

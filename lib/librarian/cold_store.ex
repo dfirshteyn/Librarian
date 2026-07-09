@@ -54,6 +54,113 @@ defmodule Librarian.ColdStore do
     end
   end
 
+  # ── Memory Relationships (audit trail) ────────────────────────────────
+
+  @doc """
+  Log a relationship between two memory IDs.
+
+  Supports: merged_into, superseded_by, cross_connected, derived_from
+  Metadata can include similarity scores, notes, or other context.
+  """
+  def log_relationship(source_id, target_id, relationship_type, user_id, metadata \\ %{})
+      when is_binary(source_id) and is_binary(target_id) and is_binary(relationship_type) and
+             is_binary(user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    metadata_json = Jason.encode!(metadata)
+
+    {:ok, _} =
+      Exqlite.query(
+        conn,
+        "INSERT INTO memory_relationships (source_id, target_id, relationship_type, metadata_json) VALUES (?1, ?2, ?3, ?4)",
+        [source_id, target_id, relationship_type, metadata_json]
+      )
+
+    :ok
+  end
+
+  @doc """
+  Get direct lineage for a memory - all relationships where this memory is involved.
+  Returns map with :outgoing (source) and :incoming (target) relationships.
+  """
+  def get_memory_lineage(memory_id, user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    outgoing =
+      case Exqlite.query(conn, "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC", [memory_id]) do
+        {:ok, %{rows: rows}} -> rows_to_relationships(rows)
+        _ -> []
+      end
+
+    incoming =
+      case Exqlite.query(conn, "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC", [memory_id]) do
+        {:ok, %{rows: rows}} -> rows_to_relationships(rows)
+        _ -> []
+      end
+
+    %{outgoing: outgoing, incoming: incoming}
+  end
+
+  @doc """
+  Get full ancestry tree for a memory using recursive CTE.
+  Returns all ancestors and descendants up to a specified depth.
+  """
+  def get_memory_ancestry(memory_id, user_id, depth \\ 5) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    {:ok, result} =
+      Exqlite.query(
+        conn,
+        """
+        WITH RECURSIVE ancestry(depth, source_id, target_id, relationship_type, metadata_json, created_at, path) AS (
+          -- Seed: direct relationships
+          SELECT 1, source_id, target_id, relationship_type, metadata_json, created_at,
+                 source_id || '->' || target_id AS path
+          FROM memory_relationships
+          WHERE source_id = ?1 OR target_id = ?1
+
+          UNION ALL
+
+          -- Recursive: follow the chain
+          SELECT a.depth + 1, r.source_id, r.target_id, r.relationship_type, r.metadata_json, r.created_at,
+                 a.path || '->' || r.target_id
+          FROM memory_relationships r
+          JOIN ancestry a ON r.source_id = a.target_id
+          WHERE a.depth < ?2
+        )
+        SELECT * FROM ancestry ORDER BY depth, created_at DESC
+        """,
+        [memory_id, depth]
+      )
+
+    result.rows |> Enum.map(&row_to_relationship/1)
+  end
+
+  defp row_to_relationship(row) do
+    [source_id, target_id, relationship_type, metadata_json, created_at] = row
+
+    %{
+      source_id: source_id,
+      target_id: target_id,
+      type: relationship_type,
+      metadata: decode_json_map(metadata_json),
+      created_at: created_at
+    }
+  end
+
+  defp rows_to_relationships(rows) do
+    Enum.map(rows, &row_to_relationship/1)
+  end
+
+  defp decode_json_map(nil), do: %{}
+
+  defp decode_json_map(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
   # ── Memory archive (SQLite) ────────────────────────────────────────
 
   @doc """

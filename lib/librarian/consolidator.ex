@@ -11,7 +11,7 @@ defmodule Librarian.Consolidator do
   memories are flagged as superseded in the WarmStore.
   """
 
-  @similarity_threshold 0.88
+  @similarity_threshold 0.75
 
   @doc ~S"""
   Run a full consolidation pass for a user.
@@ -49,7 +49,7 @@ defmodule Librarian.Consolidator do
       round1_clusters =
         pools
         |> Task.async_stream(
-          fn pool -> run_pool_swarm(pool) end,
+          fn pool -> run_pool_swarm(pool, user_id) end,
           max_concurrency: length(pools),
           timeout: 30_000
         )
@@ -62,7 +62,7 @@ defmodule Librarian.Consolidator do
       semi_memories = Enum.map(round1_clusters, fn {mem, _ids} -> mem end)
       round1_lineage = Map.new(round1_clusters, fn {mem, ids} -> {mem.id, ids} end)
 
-      final_clusters_raw = run_pool_swarm(semi_memories)
+      final_clusters_raw = run_pool_swarm(semi_memories, user_id)
 
       # Merge the lineage from both rounds: if a semi-pass keeper absorbed a
       # round-1 cluster, fold that cluster's original_ids into the final lineage.
@@ -81,7 +81,7 @@ defmodule Librarian.Consolidator do
       # Persist: write new cluster nodes, supersede originals, archive to COLD
       persist_clusters(final_clusters, user_id, opts)
 
-      survivors = Enum.map(final_clusters, fn {mem, _} -> mem end)
+      survivors = Enum.map(final_clusters, fn {mem, _ids} -> mem end)
 
       Phoenix.PubSub.broadcast(
         Librarian.PubSub,
@@ -95,7 +95,7 @@ defmodule Librarian.Consolidator do
 
   # ── Pool swarm ─────────────────────────────────────────────────────
 
-  defp run_pool_swarm(memories) when is_list(memories) do
+  defp run_pool_swarm(memories, user_id) when is_list(memories) do
     table_ref = :ets.new(:pool_swarm, [:public, :set])
 
     # Seed: store {memory.id, {memory, [memory.id]}}
@@ -139,9 +139,18 @@ defmodule Librarian.Consolidator do
                 new_lineage = Enum.uniq(current_lineage ++ neighbor_lineage)
                 :ets.insert(table_ref, {merged.id, {merged, new_lineage}})
 
+                # Log merge relationship to ColdStore for audit trail
+                Librarian.ColdStore.log_relationship(
+                  to_string(neighbor_id),
+                  to_string(m.id),
+                  "merged_into",
+                  user_id,
+                  %{similarity: sim, preview_merged: String.slice(neighbor_mem.summary || "", 0, 60)}
+                )
+
                 Phoenix.PubSub.broadcast(
                   Librarian.PubSub,
-                  "consolidation:#{user_id_from_bucket(m.bucket)}",
+                  "consolidation:#{user_id}",
                   {:merged, neighbor_id, m.id, sim,
                    String.slice(m.summary || "", 0, 60),
                    String.slice(neighbor_mem.summary || "", 0, 60)}
@@ -285,8 +294,16 @@ defmodule Librarian.Consolidator do
 
             all_originals = Enum.uniq([cluster_mem.id | original_ids])
 
+            # Log each superseded memory as a relationship
             Enum.each(all_originals, fn orig_id ->
               Librarian.WarmStore.supersede(orig_id, saved.id)
+              Librarian.ColdStore.log_relationship(
+                to_string(orig_id),
+                to_string(saved.id),
+                "superseded_by",
+                user_id,
+                %{}
+              )
             end)
 
             Librarian.ColdStore.archive(saved, user_id)
@@ -317,8 +334,4 @@ defmodule Librarian.Consolidator do
   end
 
   defp cosine_similarity(_, _), do: 0.0
-
-  defp user_id_from_bucket(bucket) do
-    bucket |> String.split(":") |> hd()
-  end
 end

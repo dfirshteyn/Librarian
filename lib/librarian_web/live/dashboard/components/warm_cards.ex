@@ -16,7 +16,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       </h2>
       <div class="flex-1 overflow-y-auto space-y-3">
         <%= for memory <- Enum.sort_by(@memories, &(-&1.importance)) do %>
-          <div class={"bg-gray-800 rounded p-3 border #{if MapSet.member?(@expanded_memories, memory.id), do: "border-blue-500", else: "border-gray-700"} cursor-pointer"}
+          <div class={"bg-gray-800 rounded p-3 border #{if MapSet.member?(@expanded_memories, memory.id), do: "border-blue-500", else: "border-gray-700"} cursor-pointer transition-colors"}
                phx-click="toggle_memory" phx-value-id={memory.id}>
             <div class="flex items-center gap-2 mb-2">
               <span class={"w-2 h-2 rounded-full flex-shrink-0 #{bucket_color(memory.bucket)}"} />
@@ -31,6 +31,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
             <%= if MapSet.member?(@expanded_memories, memory.id) do %>
               <.memory_detail memory={memory} />
+              <.lineage_detail memory={memory} tenant_id={@tenant_id} />
             <% end %>
           </div>
         <% end %>
@@ -74,7 +75,54 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
         <% end %>
       </div>
       <%= if @memory.superseded_by do %>
-        <div class="text-xs text-yellow-400">⚠️ Superseded by #<%= @memory.superseded_by %></div>
+        <div class="text-xs text-yellow-400">🔁 Superseded by #<%= @memory.superseded_by %></div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # ── Lineage Detail (audit trail) ───────────────────────────────────────
+
+  attr :memory, :map, required: true
+  attr :tenant_id, :string, required: true
+
+  def lineage_detail(assigns) do
+    lineage = Librarian.ColdStore.get_memory_lineage(to_string(assigns.memory.id), assigns.tenant_id)
+    assigns = assign(assigns, :lineage, lineage)
+
+    ~H"""
+    <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
+      <div class="text-xs">
+        <span class="text-gray-400 font-bold">🔗 Lineage:</span>
+      </div>
+
+      <%= if @lineage.outgoing != [] do %>
+        <div class="border-l-2 border-fuchsia-500 pl-2">
+          <%= for rel <- @lineage.outgoing do %>
+            <div class="text-xs mb-1">
+              <span class="text-fuchsia-400"><%= relationship_badge(rel.type) %></span>
+              <span class="text-gray-400 ml-1">#<%= rel.target_id %></span>
+              <%= if rel.metadata && rel.metadata["similarity"] do %>
+                <span class="text-gray-600">(sim: <%= Float.round(rel.metadata["similarity"], 2) %>)</span>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+
+      <%= if @lineage.incoming != [] do %>
+        <div class="border-l-2 border-emerald-500 pl-2">
+          <%= for rel <- @lineage.incoming do %>
+            <div class="text-xs mb-1">
+              <span class="text-emerald-400"><%= relationship_badge(rel.type) %></span>
+              <span class="text-gray-400 ml-1">from #<%= rel.source_id %></span>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+
+      <%= if @lineage.outgoing == [] && @lineage.incoming == [] do %>
+        <p class="text-xs text-gray-600">No lineage relationships yet.</p>
       <% end %>
     </div>
     """
