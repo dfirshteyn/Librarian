@@ -12,6 +12,7 @@ defmodule Librarian.WarmStore.Memory do
     :created_at,
     :last_accessed_at,
     :superseded_by,
+    :correlation_id,
     access_count: 0
   ]
 end
@@ -53,8 +54,9 @@ defmodule Librarian.WarmStore do
 
   # --- public API ---
 
-  def put(bucket, %Librarian.Curator.Result{} = result) do
-    GenServer.call(__MODULE__, {:put, bucket, result})
+  def put(bucket, %Librarian.Curator.Result{} = result, opts \\ []) do
+    correlation_id = Keyword.get(opts, :correlation_id)
+    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id})
   end
 
   def get(id) do
@@ -310,6 +312,7 @@ defmodule Librarian.WarmStore do
           created_at: DateTime.to_iso8601(m.created_at),
           last_accessed_at: DateTime.to_iso8601(m.last_accessed_at),
           superseded_by: m.superseded_by,
+          correlation_id: m.correlation_id,
           access_count: m.access_count
         }) <> "\n"
       end)
@@ -349,6 +352,7 @@ defmodule Librarian.WarmStore do
               created_at: created,
               last_accessed_at: accessed,
               superseded_by: map["superseded_by"],
+              correlation_id: map["correlation_id"],
               access_count: map["access_count"] || 0
             }
 
@@ -401,7 +405,7 @@ defmodule Librarian.WarmStore do
   end
 
   @impl true
-  def handle_call({:put, bucket, result}, _from, %{table: table, next_id: id} = state) do
+  def handle_call({:put, bucket, result, correlation_id}, _from, %{table: table, next_id: id} = state) do
     now = DateTime.utc_now()
 
     memory = %Librarian.WarmStore.Memory{
@@ -412,6 +416,7 @@ defmodule Librarian.WarmStore do
       tags: result.tags,
       embedding: result.embedding,
       importance: result.importance,
+      correlation_id: correlation_id,
       created_at: now,
       last_accessed_at: now
     }

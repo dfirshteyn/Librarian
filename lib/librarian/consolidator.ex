@@ -222,19 +222,34 @@ defmodule Librarian.Consolidator do
   # ── Tag boundary check ─────────────────────────────────────────────
 
   @doc """
-  Check if two memories can be merged based on project tag boundaries.
+  Check if two memories can be merged.
 
-  If both memories have explicit "project-X" tags, they must match.
-  If either (or both) lack a project tag, merging is allowed.
+  Two guards, checked in order:
+
+    1. **Correlation ID guard** — If both memories share the same
+       `correlation_id` (meaning they came from the same chunked document),
+       they are NOT merged. This preserves granular retrieval by preventing
+       the consolidator from mechanically crushing intra-document chunks
+       back together.
+
+    2. **Project tag guard** — If both memories have explicit "project-X"
+       tags, they must match. If either (or both) lack a project tag,
+       merging is allowed.
   """
   def can_merge?(memory_a, memory_b) do
-    project_a = project_tag(memory_a)
-    project_b = project_tag(memory_b)
+    # If they share the same ingestion correlation parent, do not merge
+    # mechanical chunks from the same document dump.
+    if memory_a.correlation_id == memory_b.correlation_id and not is_nil(memory_a.correlation_id) do
+      false
+    else
+      project_a = project_tag(memory_a)
+      project_b = project_tag(memory_b)
 
-    case {project_a, project_b} do
-      {nil, _} -> true
-      {_, nil} -> true
-      {a, b} -> a == b
+      case {project_a, project_b} do
+        {nil, _} -> true
+        {_, nil} -> true
+        {a, b} -> a == b
+      end
     end
   end
 

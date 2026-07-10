@@ -52,6 +52,36 @@ defmodule Librarian.ConsolidatorTest do
       b = %Memory{id: 2, bucket: "u:test", tags: ["feature"]}
       assert Consolidator.can_merge?(a, b)
     end
+
+    test "blocks merge when both share the same correlation_id" do
+      a = %Memory{id: 1, bucket: "u:test", tags: ["bug"], correlation_id: "corr_abc123"}
+      b = %Memory{id: 2, bucket: "u:test", tags: ["bug"], correlation_id: "corr_abc123"}
+      refute Consolidator.can_merge?(a, b)
+    end
+
+    test "allows merge when correlation_ids differ" do
+      a = %Memory{id: 1, bucket: "u:test", tags: ["bug"], correlation_id: "corr_abc"}
+      b = %Memory{id: 2, bucket: "u:test", tags: ["bug"], correlation_id: "corr_xyz"}
+      assert Consolidator.can_merge?(a, b)
+    end
+
+    test "allows merge when both have nil correlation_id" do
+      a = %Memory{id: 1, bucket: "u:test", tags: ["bug"], correlation_id: nil}
+      b = %Memory{id: 2, bucket: "u:test", tags: ["bug"], correlation_id: nil}
+      assert Consolidator.can_merge?(a, b)
+    end
+
+    test "allows merge when one has nil correlation_id" do
+      a = %Memory{id: 1, bucket: "u:test", tags: ["bug"], correlation_id: "corr_abc"}
+      b = %Memory{id: 2, bucket: "u:test", tags: ["bug"], correlation_id: nil}
+      assert Consolidator.can_merge?(a, b)
+    end
+
+    test "correlation_id guard takes priority over project tag match" do
+      a = %Memory{id: 1, bucket: "u:test", tags: ["project-alpha"], correlation_id: "corr_same"}
+      b = %Memory{id: 2, bucket: "u:test", tags: ["project-alpha"], correlation_id: "corr_same"}
+      refute Consolidator.can_merge?(a, b)
+    end
   end
 
   describe "weighted_mean_embedding/4" do

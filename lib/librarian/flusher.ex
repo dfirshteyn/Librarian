@@ -49,7 +49,7 @@ defmodule Librarian.Flusher do
                   end
 
                 warm_bucket = "#{user_id}:#{result.bucket || "inbox"}"
-                memory = Librarian.WarmStore.put(warm_bucket, result)
+                memory = Librarian.WarmStore.put(warm_bucket, result, correlation_id: payload.parent_id)
                 Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
                 {:ok, memory}
 
