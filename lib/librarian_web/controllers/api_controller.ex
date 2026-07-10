@@ -19,32 +19,39 @@ defmodule LibrarianWeb.ApiController do
   def ingest(conn, params) do
     user_id = get_user_id(conn)
 
-    # Handle multipart file uploads
-    params =
-      if conn.private[:phoenix_format] == "multipart" ||
-         conn.path_info == ["api", "ingest"] && has_multipart?(conn) do
-        extract_file_from_multipart(conn, params)
-      else
-        params
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      # Handle multipart file uploads
+      params =
+        if conn.private[:phoenix_format] == "multipart" ||
+           conn.path_info == ["api", "ingest"] && has_multipart?(conn) do
+          extract_file_from_multipart(conn, params)
+        else
+          params
+        end
+
+      case Librarian.IngestRouter.process(params, user_id) do
+        {:ok, bucket} ->
+          json(conn, %{ok: true, bucket: bucket, user_id: user_id})
+
+        {:ok, bucket, chunk_count} ->
+          json(conn, %{
+            ok: true,
+            bucket: bucket,
+            user_id: user_id,
+            chunk_count: chunk_count,
+            note: "Document auto-chunked into #{chunk_count} pieces"
+          })
+
+        {:error, reason} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: inspect(reason)})
       end
-
-    case Librarian.IngestRouter.process(params, user_id) do
-      {:ok, bucket} ->
-        json(conn, %{ok: true, bucket: bucket, user_id: user_id})
-
-      {:ok, bucket, chunk_count} ->
-        json(conn, %{
-          ok: true,
-          bucket: bucket,
-          user_id: user_id,
-          chunk_count: chunk_count,
-          note: "Document auto-chunked into #{chunk_count} pieces"
-        })
-
-      {:error, reason} ->
+    else
+      {:error, :budget_exhausted} ->
         conn
-        |> put_status(422)
-        |> json(%{ok: false, error: inspect(reason)})
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
     end
   end
 
@@ -57,15 +64,23 @@ defmodule LibrarianWeb.ApiController do
   """
   def recall(conn, %{"q" => query}) do
     user_id = get_user_id(conn)
-    %{warm: warm, related: related} = Librarian.recall(query, user_id)
 
-    json(conn, %{
-      ok: true,
-      query: query,
-      user_id: user_id,
-      warm: Enum.map(warm, &serialize_memory/1),
-      related: Enum.map(related, &serialize_memory/1)
-    })
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      %{warm: warm, related: related} = Librarian.recall(query, user_id)
+
+      json(conn, %{
+        ok: true,
+        query: query,
+        user_id: user_id,
+        warm: Enum.map(warm, &serialize_memory/1),
+        related: Enum.map(related, &serialize_memory/1)
+      })
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
   end
 
   def recall(conn, _params) do
@@ -80,33 +95,41 @@ defmodule LibrarianWeb.ApiController do
   """
   def curator_health(conn, _params) do
     user_id = get_user_id(conn)
-    curator_impl = Librarian.Curator.resolve_curator(user_id, [])
 
-    test_payload = %Librarian.Capture.Payload{
-      source: "health_check",
-      raw_text: "The server deployed successfully to production at midnight.",
-      occurred_at: DateTime.utc_now(),
-      hint_tags: []
-    }
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      curator_impl = Librarian.Curator.resolve_curator(user_id, [])
 
-    result =
-      case Librarian.Curator.summarize([test_payload], curator_impl) do
-        {:ok, r} ->
-          %{
-            ok: true,
-            curator: inspect(curator_impl),
-            summary: r.summary,
-            facts: r.facts,
-            tags: r.tags,
-            bucket: r.bucket,
-            importance: r.importance
-          }
+      test_payload = %Librarian.Capture.Payload{
+        source: "health_check",
+        raw_text: "The server deployed successfully to production at midnight.",
+        occurred_at: DateTime.utc_now(),
+        hint_tags: []
+      }
 
-        {:error, reason} ->
-          %{ok: false, curator: inspect(curator_impl), error: inspect(reason)}
-      end
+      result =
+        case Librarian.Curator.summarize([test_payload], curator_impl) do
+          {:ok, r} ->
+            %{
+              ok: true,
+              curator: inspect(curator_impl),
+              summary: r.summary,
+              facts: r.facts,
+              tags: r.tags,
+              bucket: r.bucket,
+              importance: r.importance
+            }
 
-    json(conn, result)
+          {:error, reason} ->
+            %{ok: false, curator: inspect(curator_impl), error: inspect(reason)}
+        end
+
+      json(conn, result)
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
   end
 
   @doc """
@@ -115,7 +138,15 @@ defmodule LibrarianWeb.ApiController do
   """
   def status(conn, _params) do
     user_id = get_user_id(conn)
-    json(conn, Map.put(Librarian.status(user_id), :ok, true))
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      json(conn, Map.put(Librarian.status(user_id), :ok, true))
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
   end
 
   @doc """
@@ -126,19 +157,26 @@ defmodule LibrarianWeb.ApiController do
   Drains HOT buffers to WARM through the configured curator.
   """
   def flush(conn, params) do
-    bucket = params["bucket"] || "all"
+    user_id = get_user_id(conn)
 
-    results =
-      case bucket do
-        "all" -> Librarian.Flusher.flush_all()
-        b -> [Librarian.Flusher.flush_bucket(b)]
-      end
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      bucket = params["bucket"] || "all"
 
-    json(conn, %{ok: true, bucket: bucket, results: inspect(results)})
+      results =
+        case bucket do
+          "all" -> Librarian.Flusher.flush_all()
+          b -> [Librarian.Flusher.flush_bucket(b)]
+        end
+
+      json(conn, %{ok: true, bucket: bucket, results: inspect(results)})
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
   end
 
-  # X-User-Id header for multi-tenant — in production this would be
-  # validated against a session token. For the hackathon, trust the header.
   @doc """
   GET /api/export
   Optional header: X-User-Id (defaults to "local")
@@ -148,27 +186,34 @@ defmodule LibrarianWeb.ApiController do
   """
   def export(conn, _params) do
     user_id = get_user_id(conn)
-    path = Librarian.ColdStore.ConnectionManager.db_path(user_id)
 
-    if File.exists?(path) do
-      memories = export_memories(user_id)
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      path = Librarian.ColdStore.ConnectionManager.db_path(user_id)
 
-      conn
-      |> put_resp_content_type("application/json")
-      |> put_resp_header("content-disposition", "attachment; filename=\"#{user_id}_memories.json\"")
-      |> send_resp(200, Jason.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
+      if File.exists?(path) do
+        memories = export_memories(user_id)
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> put_resp_header("content-disposition", "attachment; filename=\"#{user_id}_memories.json\"")
+        |> send_resp(200, Jason.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
+      else
+        conn
+        |> put_status(404)
+        |> json(%{ok: false, error: "no memories found for this user"})
+      end
     else
-      conn
-      |> put_status(404)
-      |> json(%{ok: false, error: "no memories found for this user"})
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
     end
   end
 
+  # sandbox_id is assigned by the Librarian.Auth.Plug running in the :api pipeline.
+  # It is either an existing verified token or a freshly generated anonymous one.
   defp get_user_id(conn) do
-    case get_req_header(conn, "x-user-id") do
-      [id | _] when byte_size(id) > 0 -> id
-      _ -> "local"
-    end
+    conn.assigns[:sandbox_id] || "local"
   end
 
   defp export_memories(user_id) do

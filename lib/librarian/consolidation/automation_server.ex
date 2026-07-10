@@ -14,6 +14,7 @@ defmodule Librarian.Consolidation.AutomationServer do
   # Configurable via application env for testing
   @default_poll_ms 60_000
   @default_min_memories 2
+  @default_sweep_ms 86_400_000  # 24 hours
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -22,6 +23,7 @@ defmodule Librarian.Consolidation.AutomationServer do
   @impl true
   def init(_opts) do
     schedule_poll()
+    schedule_daily_sweep()
     {:ok, %{in_progress: MapSet.new(), monitors: %{}}}
   end
 
@@ -53,6 +55,13 @@ defmodule Librarian.Consolidation.AutomationServer do
   def handle_info(:poll, state) do
     state = check_and_spawn(state)
     schedule_poll()
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:daily_sweep, state) do
+    run_daily_sweep()
+    schedule_daily_sweep()
     {:noreply, state}
   end
 
@@ -102,6 +111,11 @@ defmodule Librarian.Consolidation.AutomationServer do
     Process.send_after(self(), :poll, poll_ms)
   end
 
+  defp schedule_daily_sweep do
+    sweep_ms = Application.get_env(:librarian, :daily_sweep_ms, @default_sweep_ms)
+    Process.send_after(self(), :daily_sweep, sweep_ms)
+  end
+
   # Users that should never be auto-consolidated (dev/iex leftovers)
   @skip_user_ids ~w(local)
 
@@ -142,5 +156,34 @@ defmodule Librarian.Consolidation.AutomationServer do
 
     monitors = Map.put(monitors, task.ref, user_id)
     {%{state | in_progress: in_progress, monitors: monitors}, task}
+  end
+
+  # ── Daily Sweep ──────────────────────────────────────────────────────
+
+  @doc false
+  def run_daily_sweep do
+    require Logger
+
+    stale_ids = Librarian.Auth.Manifest.stale_sandbox_ids()
+
+    if stale_ids == [] do
+      Logger.info("Daily sweep: no stale sandboxes found")
+      :ok
+    else
+      Logger.info("Daily sweep: found #{length(stale_ids)} stale sandbox(es)")
+
+      Enum.each(stale_ids, fn sandbox_id ->
+        # Skip judge accounts — their data should persist
+        if Librarian.Auth.gc_whitelisted?(sandbox_id) do
+          Logger.info("Daily sweep: skipping judge account #{sandbox_id}")
+        else
+          Logger.info("Daily sweep: cleaning up stale sandbox #{sandbox_id}")
+          Librarian.ColdStore.ConnectionManager.close_connection(sandbox_id)
+          Librarian.Auth.Manifest.delete(sandbox_id)
+        end
+      end)
+
+      :ok
+    end
   end
 end

@@ -23,6 +23,7 @@ defmodule Librarian.Application do
     # ETS tables must exist before any connections are requested
     Librarian.ColdStore.ConnectionManager.init_table()
     Librarian.RateLimiter.init()
+    Librarian.Auth.Manifest.init()
 
     opts = [strategy: :one_for_one, name: Librarian.Supervisor]
 

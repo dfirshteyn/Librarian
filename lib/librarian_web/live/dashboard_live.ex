@@ -8,6 +8,7 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.WarmCards
   import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
   import LibrarianWeb.Dashboard.Components.InsightsPanel
+  import LibrarianWeb.Dashboard.Components.AncestryModal
 
   alias Librarian.{WarmStore, HotStore, Flusher}
 
@@ -165,6 +166,8 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:expanded_memories, MapSet.new())
      |> assign(:demo_running, false)
      |> assign(:demo_total, 0)
+     |> assign(:ancestry_memory_id, nil)
+     |> assign(:ancestry_tree, [])
      |> assign(:structured_response, nil)
      |> assign(
        :flush_concurrency,
@@ -390,6 +393,17 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, assign(socket, :expanded_memories, new_set)}
   end
 
+  def handle_event("open_ancestry", %{"id" => id}, socket) do
+    memory_id = String.to_integer(id)
+    tid = socket.assigns.tenant_id
+    tree = Librarian.ColdStore.get_memory_ancestry(to_string(memory_id), tid)
+    {:noreply, assign(socket, ancestry_memory_id: memory_id, ancestry_tree: tree)}
+  end
+
+  def handle_event("close_ancestry", _params, socket) do
+    {:noreply, assign(socket, ancestry_memory_id: nil, ancestry_tree: [])}
+  end
+
   def handle_event("flush_bucket", %{"bucket" => bucket}, socket) do
     case Librarian.Flusher.flush_bucket(bucket, force_local: socket.assigns.force_local) do
       {:ok, _} ->
@@ -572,6 +586,10 @@ defmodule LibrarianWeb.DashboardLive do
       <div class="grid grid-cols-2 gap-4" style="height: calc(50vh - 160px);">
         <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} />
       </div>
+
+      <%= if @ancestry_memory_id do %>
+        <.ancestry_modal memory_id={@ancestry_memory_id} tenant_id={@tenant_id} ancestry={@ancestry_tree} />
+      <% end %>
     </div>
     """
   end

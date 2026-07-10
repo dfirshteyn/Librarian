@@ -77,6 +77,10 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       <%= if @memory.superseded_by do %>
         <div class="text-xs text-yellow-400">🔁 Superseded by #<%= @memory.superseded_by %></div>
       <% end %>
+      <button phx-click="open_ancestry" phx-value-id={@memory.id}
+        class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition">
+        🌳 View Ancestry
+      </button>
     </div>
     """
   end

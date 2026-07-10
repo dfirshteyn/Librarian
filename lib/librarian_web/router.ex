@@ -8,11 +8,13 @@ defmodule LibrarianWeb.Router do
     plug(:put_root_layout, html: {LibrarianWeb.Layouts, :root})
     plug(:protect_from_forgery)
     plug(:put_secure_browser_headers)
+    plug(Librarian.Auth.Plug)
   end
 
   pipeline :api do
     plug(:accepts, ["json"])
     plug(:check_rate)
+    plug(Librarian.Auth.Plug)
   end
 
   # Rate limiter plug — 100 req/min per IP+tenant pair, burst to 200

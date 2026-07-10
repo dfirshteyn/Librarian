@@ -237,8 +237,10 @@ defmodule Librarian.ColdStore do
   @doc """
   Search memories by vector similarity using cosine distance.
 
-  Uses `vec_distance_cosine` from sqlite-vec when the extension is loaded,
-  otherwise falls back to Elixir-side cosine similarity on all memories.
+  Tries three strategies in order:
+    1. **vec0 virtual table** — fastest, uses sqlite-vec's native index
+    2. **vec_distance_cosine** — direct on `memories.embedding` column
+    3. **Elixir-side cosine similarity** — fallback when extension not loaded
 
   Returns up to `limit` results, each with an added `distance` field.
   """
@@ -246,33 +248,40 @@ defmodule Librarian.ColdStore do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
     blob = pack_embedding(query_embedding)
 
-    # Try sqlite-vec first; if it fails (extension not loaded), fall back
-    case try_vec_distance(conn, blob, limit) do
+    # Strategy 1: vec0 virtual table (fastest, requires extension)
+    case try_vec0_search(conn, blob, limit) do
       {:ok, rows} ->
         rows |> Enum.map(&row_to_memory/1)
 
       {:error, _} ->
-        # Fallback: Elixir-side cosine similarity
-        {:ok, result} =
-          Exqlite.query(
-            conn,
-            """
-            SELECT id, bucket, summary, facts, tags, importance,
-                   created_at, last_accessed_at, superseded_by, embedding
-            FROM memories
-            WHERE embedding IS NOT NULL
-            """,
-            []
-          )
+        # Strategy 2: vec_distance_cosine on memories table
+        case try_vec_distance(conn, blob, limit) do
+          {:ok, rows} ->
+            rows |> Enum.map(&row_to_memory/1)
 
-        result.rows
-        |> Enum.map(fn row ->
-          memory = row_to_memory_full(row)
-          distance = cosine_distance(query_embedding, memory.embedding)
-          Map.put(memory, :distance, distance)
-        end)
-        |> Enum.sort_by(fn m -> m.distance end)
-        |> Enum.take(limit)
+          {:error, _} ->
+            # Strategy 3: Elixir-side cosine similarity (no extension)
+            {:ok, result} =
+              Exqlite.query(
+                conn,
+                """
+                SELECT id, bucket, summary, facts, tags, importance,
+                       created_at, last_accessed_at, superseded_by, embedding
+                FROM memories
+                WHERE embedding IS NOT NULL
+                """,
+                []
+              )
+
+            result.rows
+            |> Enum.map(fn row ->
+              memory = row_to_memory_full(row)
+              distance = cosine_distance(query_embedding, memory.embedding)
+              Map.put(memory, :distance, distance)
+            end)
+            |> Enum.sort_by(fn m -> m.distance end)
+            |> Enum.take(limit)
+        end
     end
   end
 
@@ -524,6 +533,23 @@ defmodule Librarian.ColdStore do
       {:ok, list} when is_list(list) -> list
       _ -> []
     end
+  end
+
+  defp try_vec0_search(conn, blob, limit) do
+    Exqlite.query(
+      conn,
+      """
+      SELECT m.id, m.bucket, m.summary, m.facts, m.tags, m.importance,
+             m.created_at, m.last_accessed_at, m.superseded_by,
+             v.distance
+      FROM vec_memories v
+      JOIN memories m ON v.rowid = m.id
+      WHERE v.embedding MATCH ?1
+        AND k = ?2
+      ORDER BY v.distance
+      """,
+      [blob, limit]
+    )
   end
 
   defp try_vec_distance(conn, blob, limit) do

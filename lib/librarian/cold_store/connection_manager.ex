@@ -124,6 +124,37 @@ defmodule Librarian.ColdStore.ConnectionManager do
   end
 
   @doc """
+  Close a specific user's connection, remove it from ETS, and delete the .db file.
+  Used by the daily sweep to clean up stale anonymous sandboxes.
+  Does nothing if the user has no active connection.
+  """
+  def close_connection(user_id) when is_binary(user_id) do
+    case :ets.lookup(@table, user_id) do
+      [{^user_id, pid}] when is_pid(pid) ->
+        # Terminate the connection process via the dynamic supervisor
+        DynamicSupervisor.terminate_child(Librarian.ColdStore.ConnectionSupervisor, pid)
+        :ets.delete(@table, user_id)
+
+        # Delete the .db file from disk
+        path = db_path(user_id)
+        if File.exists?(path) do
+          File.rm!(path)
+        end
+
+        :ok
+
+      _ ->
+        # No active connection — skip. Still try to delete the file though.
+        path = db_path(user_id)
+        if File.exists?(path) do
+          File.rm!(path)
+        end
+
+        :ok
+    end
+  end
+
+  @doc """
   Return the database file path for a user_id.
   Uses `:db_dir` config (defaults to "priv/data").
   """
@@ -138,9 +169,17 @@ defmodule Librarian.ColdStore.ConnectionManager do
     path = db_path(user_id)
     File.mkdir_p!(Path.dirname(path))
 
+    connect_opts =
+      if Application.get_env(:librarian, :sqlite_vec_enabled, false) do
+        vec_path = Application.get_env(:librarian, :sqlite_vec_path, "priv/ext/vec0.so")
+        [database: path, load_extensions: [vec_path]]
+      else
+        [database: path]
+      end
+
     child_spec = %{
       id: {:cold_conn, user_id},
-      start: {DBConnection.ConnectionPool, :start_link, [{Exqlite.Connection, [database: path]}]},
+      start: {DBConnection.ConnectionPool, :start_link, [{Exqlite.Connection, connect_opts}]},
       type: :worker,
       restart: :permanent,
       shutdown: 5_000
@@ -150,7 +189,6 @@ defmodule Librarian.ColdStore.ConnectionManager do
       {:ok, pid} ->
         :ets.insert(@table, {user_id, pid})
         init_schema(pid)
-        load_vec_extension(pid)
         pid
 
       {:error, {:already_started, pid}} ->
@@ -167,15 +205,27 @@ defmodule Librarian.ColdStore.ConnectionManager do
       {:ok, _} = Exqlite.query(conn, stmt, [])
     end)
 
+    # Only create vec0 virtual table if sqlite-vec is enabled
+    if Application.get_env(:librarian, :sqlite_vec_enabled, false) do
+      vec_stmt = """
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(
+        embedding float[768] distance_metric=cosine
+      )
+      """
+      {:ok, _} = Exqlite.query(conn, vec_stmt, [])
+
+      vec_trigger = """
+      CREATE TRIGGER IF NOT EXISTS memories_vec_ai AFTER INSERT ON memories
+      WHEN new.embedding IS NOT NULL
+      BEGIN
+        INSERT INTO vec_memories(rowid, embedding)
+        VALUES (new.id, new.embedding);
+      END
+      """
+      {:ok, _} = Exqlite.query(conn, vec_trigger, [])
+    end
+
     :ok
   end
 
-  defp load_vec_extension(_conn) do
-    # sqlite-vec extension loading is skipped by default.
-    # To enable it, install the extension and configure :sqlite_vec_path.
-    # The extension must be loaded via Exqlite.Basic.enable_load_extension/1
-    # on a raw connection before calling load_extension().
-    # Vector search falls back to Elixir-side cosine similarity automatically.
-    :ok
-  end
 end
