@@ -112,7 +112,7 @@ defmodule Librarian.Auth.Plug do
     base = [
       max_age: cookie_config(:max_age, @default_cookie_max_age),
       http_only: true,
-      same_site: :lax
+      same_site: "lax"
     ]
 
     if Mix.env() == :prod do
