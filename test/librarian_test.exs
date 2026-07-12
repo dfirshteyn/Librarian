@@ -524,3 +524,322 @@ defmodule Librarian.WalCrashRecoveryTest do
     assert recovered.metadata["replayed"] == true
   end
 end
+
+defmodule Librarian.BucketCRUDTest do
+  use ExUnit.Case, async: false
+
+  @test_user "bucket_crud_test_#{:erlang.unique_integer([:positive])}"
+
+  setup do
+    # Ensure clean state for this test user
+    on_exit(fn ->
+      Enum.each(Librarian.WarmStore.all(), fn m ->
+        if String.starts_with?(m.bucket, @test_user <> ":"), do: Librarian.WarmStore.forget(m.id)
+      end)
+
+      # Close and delete the test user's COLD database
+      Librarian.ColdStore.ConnectionManager.close_connection(@test_user)
+    end)
+
+    :ok
+  end
+
+  describe "create_bucket/2" do
+    test "creates a new bucket successfully" do
+      assert {:ok, "my_custom_bucket"} = Librarian.create_bucket("my_custom_bucket", @test_user)
+      buckets = Librarian.list_buckets(@test_user)
+      assert Enum.any?(buckets, &(&1.name == "my_custom_bucket"))
+    end
+
+    test "rejects reserved system bucket name" do
+      assert {:error, :reserved_name} = Librarian.create_bucket("inbox", @test_user)
+    end
+
+    test "rejects empty name" do
+      assert {:error, :name_empty} = Librarian.create_bucket("", @test_user)
+    end
+
+    test "rejects name that is only whitespace after trimming" do
+      assert {:error, :name_empty} = Librarian.create_bucket("   ", @test_user)
+    end
+
+    test "normalizes to lowercase" do
+      assert {:ok, "my_bucket"} = Librarian.create_bucket("My_Bucket", @test_user)
+      buckets = Librarian.list_buckets(@test_user)
+      assert Enum.any?(buckets, &(&1.name == "my_bucket"))
+    end
+
+    test "rejects duplicate name" do
+      assert {:ok, "unique_bucket"} = Librarian.create_bucket("unique_bucket", @test_user)
+      # Second create with same name is idempotent (INSERT OR IGNORE)
+      assert {:ok, "unique_bucket"} = Librarian.create_bucket("unique_bucket", @test_user)
+    end
+  end
+
+  describe "list_buckets/1" do
+    test "returns default buckets on first access" do
+      buckets = Librarian.list_buckets(@test_user)
+      names = Enum.map(buckets, & &1.name)
+      assert "inbox" in names
+      assert "project" in names
+      assert "research" in names
+      assert "ideas" in names
+      assert "thoughts" in names
+      assert "finance" in names
+    end
+
+    test "includes newly created buckets" do
+      assert {:ok, "new_bucket"} = Librarian.create_bucket("new_bucket", @test_user)
+      buckets = Librarian.list_buckets(@test_user)
+      assert Enum.any?(buckets, &(&1.name == "new_bucket"))
+    end
+
+    test "excludes deleted buckets by default" do
+      assert {:ok, "temp_bucket"} = Librarian.create_bucket("temp_bucket", @test_user)
+      assert {:ok, _archived} = Librarian.delete_bucket("temp_bucket", @test_user)
+      buckets = Librarian.list_buckets(@test_user)
+      refute Enum.any?(buckets, &(&1.name == "temp_bucket"))
+    end
+
+    test "reports hot_count and warm_count as zero for empty buckets" do
+      assert {:ok, "empty_bucket"} = Librarian.create_bucket("empty_bucket", @test_user)
+      buckets = Librarian.list_buckets(@test_user)
+      empty = Enum.find(buckets, &(&1.name == "empty_bucket"))
+      assert empty.hot_count == 0
+      assert empty.warm_count == 0
+    end
+  end
+
+  describe "rename_bucket/3" do
+    test "renames a bucket successfully" do
+      assert {:ok, "old_name"} = Librarian.create_bucket("old_name", @test_user)
+      assert {:ok, "new_name"} = Librarian.rename_bucket("old_name", "new_name", @test_user)
+
+      buckets = Librarian.list_buckets(@test_user)
+      assert Enum.any?(buckets, &(&1.name == "new_name"))
+      refute Enum.any?(buckets, &(&1.name == "old_name"))
+    end
+
+    test "rejects renaming the system inbox bucket" do
+      assert {:error, :cannot_modify_system_bucket} = Librarian.rename_bucket("inbox", "not_inbox", @test_user)
+    end
+
+    test "rejects renaming to a system bucket name" do
+      assert {:ok, "my_bucket"} = Librarian.create_bucket("my_bucket", @test_user)
+      assert {:error, :reserved_name} = Librarian.rename_bucket("my_bucket", "inbox", @test_user)
+    end
+
+    test "returns not_found for non-existent bucket" do
+      assert {:error, :not_found} = Librarian.rename_bucket("nonexistent", "something", @test_user)
+    end
+
+    test "rejects renaming to an already existing name" do
+      assert {:ok, "bucket_a"} = Librarian.create_bucket("bucket_a", @test_user)
+      assert {:ok, "bucket_b"} = Librarian.create_bucket("bucket_b", @test_user)
+      assert {:error, :already_exists} = Librarian.rename_bucket("bucket_a", "bucket_b", @test_user)
+    end
+
+    test "renaming preserves memories across tiers" do
+      # The Stub curator classifies deploy/project text as "project" (a default bucket).
+      # Create a custom bucket, then rename it to verify all tiers update.
+      assert {:ok, "project"} = Librarian.create_bucket("project", @test_user)
+
+      # Ingest something that the Stub curator will classify as "project"
+      {:ok, inbox} = Librarian.ingest(%{
+        "source" => "test",
+        "raw_text" => "we decided to deploy the new router for this project"
+      }, @test_user)
+
+      assert inbox == "#{@test_user}:inbox"
+
+      # Flush — Stub classifies as "project", normalize_bucket maps to "project"
+      assert {:ok, [memory]} = Librarian.Flusher.flush_bucket(inbox)
+      assert memory.bucket == "#{@test_user}:project"
+
+      # Rename the bucket
+      assert {:ok, "renamed_project"} = Librarian.rename_bucket("project", "renamed_project", @test_user)
+
+      # The memory should now be in the renamed bucket
+      %{warm: warm} = Librarian.recall("deploy", @test_user)
+      renamed_memory = Enum.find(warm, &(&1.id == memory.id))
+      assert renamed_memory != nil
+      assert renamed_memory.bucket == "#{@test_user}:renamed_project"
+    end
+  end
+
+  describe "delete_bucket/2" do
+    test "deletes a bucket successfully" do
+      assert {:ok, "delete_me"} = Librarian.create_bucket("delete_me", @test_user)
+      assert {:ok, 0} = Librarian.delete_bucket("delete_me", @test_user)
+
+      buckets = Librarian.list_buckets(@test_user)
+      refute Enum.any?(buckets, &(&1.name == "delete_me"))
+    end
+
+    test "rejects deleting the system inbox bucket" do
+      assert {:error, :cannot_modify_system_bucket} = Librarian.delete_bucket("inbox", @test_user)
+    end
+
+    test "returns not_found for non-existent bucket" do
+      assert {:error, :not_found} = Librarian.delete_bucket("nonexistent", @test_user)
+    end
+
+    test "archives WARM memories to COLD on delete" do
+      # The Stub curator classifies deploy/project text as "project" (a default bucket).
+      assert {:ok, "project"} = Librarian.create_bucket("project", @test_user)
+
+      # Ingest and flush to create a WARM memory
+      {:ok, inbox} = Librarian.ingest(%{
+        "source" => "test",
+        "raw_text" => "we decided to deploy the new router for this project"
+      }, @test_user)
+
+      assert {:ok, [memory]} = Librarian.Flusher.flush_bucket(inbox)
+      assert memory.bucket == "#{@test_user}:project"
+
+      # Delete the bucket — should archive the memory to COLD
+      assert {:ok, 1} = Librarian.delete_bucket("project", @test_user)
+
+      # Memory should be gone from WARM
+      assert Librarian.WarmStore.get(memory.id) == nil
+
+      # Memory should be findable in COLD by the original bucket field
+      conn = Librarian.ColdStore.ConnectionManager.get_conn(@test_user)
+      {:ok, %{rows: rows}} = Exqlite.query(conn, "SELECT bucket, summary FROM memories WHERE bucket = ?1", ["#{@test_user}:project"])
+      assert length(rows) >= 1
+      archived_bucket = rows |> hd() |> List.first()
+      assert archived_bucket == "#{@test_user}:project"
+    end
+
+    test "delete is idempotent" do
+      assert {:ok, "gone"} = Librarian.create_bucket("gone", @test_user)
+      assert {:ok, _} = Librarian.delete_bucket("gone", @test_user)
+      assert {:error, :not_found} = Librarian.delete_bucket("gone", @test_user)
+    end
+
+    test "delete preserves relationship graph edges for ancestry queries" do
+      # Create two buckets: one for parent memories and one for chunk children
+      assert {:ok, "project"} = Librarian.create_bucket("project", @test_user)
+      assert {:ok, "project_chunks"} = Librarian.create_bucket("project_chunks", @test_user)
+
+      # Create a parent memory in "project"
+      parent = Librarian.WarmStore.put(
+        "#{@test_user}:project",
+        %Librarian.Curator.Result{summary: "parent doc", facts: [], tags: ["doc"], importance: 0.8}
+      )
+
+      # Create a child memory in "project_chunks"
+      child = Librarian.WarmStore.put(
+        "#{@test_user}:project_chunks",
+        %Librarian.Curator.Result{summary: "child chunk", facts: [], tags: ["chunk"], importance: 0.5}
+      )
+
+      # Log a chunk_of relationship: child -> parent
+      Librarian.ColdStore.log_relationship(
+        Integer.to_string(child.id),
+        Integer.to_string(parent.id),
+        "chunk_of",
+        @test_user,
+        %{note: "auto-chunked"}
+      )
+
+      # Verify ancestry resolves before delete — should show the child
+      lineage_before = Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
+
+      # Outgoing should be empty (parent doesn't point to anything)
+      assert lineage_before.outgoing == []
+
+      # Incoming should include the child
+      assert length(lineage_before.incoming) >= 1
+      incoming_ids = Enum.map(lineage_before.incoming, & &1.source_id)
+      assert Integer.to_string(child.id) in incoming_ids
+
+      # Delete the child's bucket
+      assert {:ok, 1} = Librarian.delete_bucket("project_chunks", @test_user)
+
+      # Child should be gone from WARM
+      assert Librarian.WarmStore.get(child.id) == nil
+
+      # Ancestry should still resolve — the relationship edge is NOT severed
+      lineage_after = Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
+      assert length(lineage_after.incoming) >= 1
+      incoming_ids_after = Enum.map(lineage_after.incoming, & &1.source_id)
+      assert Integer.to_string(child.id) in incoming_ids_after,
+        "ancestry query must still surface the archived child's relationship edge"
+
+      # Full recursive ancestry should also resolve
+      ancestry = Librarian.ColdStore.get_memory_ancestry(Integer.to_string(parent.id), @test_user)
+      assert length(ancestry) >= 1
+      ancestry_source_ids = Enum.map(ancestry, & &1.source_id)
+      ancestry_target_ids = Enum.map(ancestry, & &1.target_id)
+      assert Integer.to_string(child.id) in ancestry_source_ids,
+        "recursive ancestry must include the archived child as a source"
+      assert Integer.to_string(parent.id) in ancestry_target_ids,
+        "recursive ancestry must include the parent as a target"
+    end
+  end
+
+  describe "normalize_bucket/2" do
+    test "returns the bucket name if it exists in the user's list" do
+      assert {:ok, "custom"} = Librarian.create_bucket("custom", @test_user)
+      assert Librarian.Router.normalize_bucket("custom", @test_user) == "custom"
+    end
+
+    test "falls back to inbox for unknown bucket names" do
+      assert Librarian.Router.normalize_bucket("nonexistent", @test_user) == "inbox"
+    end
+
+    test "falls back to inbox for nil" do
+      assert Librarian.Router.normalize_bucket(nil, @test_user) == "inbox"
+    end
+
+    test "falls back to inbox for empty string" do
+      assert Librarian.Router.normalize_bucket("", @test_user) == "inbox"
+    end
+
+    test "defaults to local user" do
+      # "local" user should have "project" in their default buckets
+      assert Librarian.Router.normalize_bucket("project") == "project"
+    end
+  end
+
+  describe "bucket limit" do
+    test "rejects creating more than the configured limit" do
+      # Override limit to 3 so we only need 4 rows to hit it
+      Application.put_env(:librarian, :max_buckets_per_user, 3)
+
+      try do
+        # Default buckets (6) are already seeded, but they count against the limit.
+        # We're using a fresh test user, so after seeding: inbox,project,research,ideas,thoughts,finance = 6.
+        # That's already >= 3, so creating any new bucket should fail immediately.
+        assert {:error, {:bucket_limit_reached, 3}} =
+                 Librarian.create_bucket("first_new", @test_user)
+
+        # Default buckets are still active and functional
+        buckets = Librarian.list_buckets(@test_user)
+        assert length(buckets) == 6
+      after
+        Application.put_env(:librarian, :max_buckets_per_user, 30)
+      end
+    end
+
+    test "allows creating buckets when under the limit" do
+      # Override limit to 10
+      Application.put_env(:librarian, :max_buckets_per_user, 10)
+
+      try do
+        # After 6 defaults, we have room for 4 more
+        assert {:ok, "extra_1"} = Librarian.create_bucket("extra_1", @test_user)
+        assert {:ok, "extra_2"} = Librarian.create_bucket("extra_2", @test_user)
+        assert {:ok, "extra_3"} = Librarian.create_bucket("extra_3", @test_user)
+        assert {:ok, "extra_4"} = Librarian.create_bucket("extra_4", @test_user)
+
+        # 10th bucket should fail
+        assert {:error, {:bucket_limit_reached, 10}} =
+                 Librarian.create_bucket("extra_5", @test_user)
+      after
+        Application.put_env(:librarian, :max_buckets_per_user, 30)
+      end
+    end
+  end
+end

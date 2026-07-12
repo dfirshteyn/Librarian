@@ -255,6 +255,167 @@ defmodule LibrarianWeb.ApiController do
     }
   end
 
+  @doc """
+  GET /api/buckets
+  Optional header: X-User-Id (defaults to "local")
+
+  Lists all active buckets for the requesting user with HOT/WARM counts.
+  """
+  def list_buckets(conn, _params) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      buckets = Librarian.list_buckets(user_id)
+      json(conn, %{ok: true, user_id: user_id, buckets: buckets})
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  @doc """
+  POST /api/buckets
+  Body: {"name": "new_bucket"}
+  Optional header: X-User-Id (defaults to "local")
+
+  Creates a new bucket for the requesting user.
+  Returns 422 if name is reserved, empty, or limit reached.
+  """
+  def create_bucket(conn, %{"name" => name}) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case Librarian.create_bucket(name, user_id) do
+        {:ok, bucket_name} ->
+          json(conn, %{ok: true, bucket: bucket_name, user_id: user_id})
+
+        {:error, :reserved_name} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "reserved bucket name", user_id: user_id})
+
+        {:error, :name_empty} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "bucket name cannot be empty", user_id: user_id})
+
+        {:error, {:bucket_limit_reached, limit}} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "bucket limit (#{limit}) reached", user_id: user_id, limit: limit})
+
+        {:error, reason} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: inspect(reason), user_id: user_id})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def create_bucket(conn, _params) do
+    user_id = get_user_id(conn)
+    conn |> put_status(422) |> json(%{ok: false, error: "missing name field", user_id: user_id})
+  end
+
+  @doc """
+  PUT /api/buckets/:name
+  Body: {"new_name": "renamed_bucket"}
+  Optional header: X-User-Id (defaults to "local")
+
+  Renames a bucket across all tiers.
+  Returns 422 if name is reserved, empty, already exists, or not found.
+  """
+  def rename_bucket(conn, %{"name" => old_name, "new_name" => new_name}) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case Librarian.rename_bucket(old_name, new_name, user_id) do
+        {:ok, bucket_name} ->
+          json(conn, %{ok: true, bucket: bucket_name, user_id: user_id})
+
+        {:error, :cannot_modify_system_bucket} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "cannot modify system bucket", user_id: user_id})
+
+        {:error, :not_found} ->
+          conn
+          |> put_status(404)
+          |> json(%{ok: false, error: "bucket not found", user_id: user_id})
+
+        {:error, :already_exists} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "bucket name already exists", user_id: user_id})
+
+        {:error, reason} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: inspect(reason), user_id: user_id})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def rename_bucket(conn, _params) do
+    user_id = get_user_id(conn)
+    conn |> put_status(422) |> json(%{ok: false, error: "missing name or new_name", user_id: user_id})
+  end
+
+  @doc """
+  DELETE /api/buckets/:name
+  Optional header: X-User-Id (defaults to "local")
+
+  Soft-deletes a bucket. Archives WARM memories to COLD, discards HOT data.
+  Returns 422 if name is a system bucket, 404 if not found.
+  """
+  def delete_bucket(conn, %{"name" => name}) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case Librarian.delete_bucket(name, user_id) do
+        {:ok, archived_count} ->
+          json(conn, %{ok: true, bucket: name, user_id: user_id, archived: archived_count})
+
+        {:error, :cannot_modify_system_bucket} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "cannot modify system bucket", user_id: user_id})
+
+        {:error, :not_found} ->
+          conn
+          |> put_status(404)
+          |> json(%{ok: false, error: "bucket not found", user_id: user_id})
+
+        {:error, reason} ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: inspect(reason), user_id: user_id})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def delete_bucket(conn, _params) do
+    user_id = get_user_id(conn)
+    conn |> put_status(422) |> json(%{ok: false, error: "missing name", user_id: user_id})
+  end
+
   # Multipart file handling
 
   defp has_multipart?(conn) do

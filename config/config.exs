@@ -16,7 +16,9 @@ config :librarian,
     chunk_overlap: 50,
     large_text_threshold: 1500
   ],
-  parallel_flush_max_concurrency: 1
+  parallel_flush_max_concurrency: 1,
+  max_buckets_per_user: 30,
+  system_buckets: ["inbox"]
 
 # Ecto repo
 config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.db"

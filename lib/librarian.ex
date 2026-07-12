@@ -108,7 +108,67 @@ defmodule Librarian do
     }
   end
 
-  def morning_briefing(limit \\ 5) do
-    Librarian.ColdStore.read_insights(limit)
+  # ── Bucket CRUD ─────────────────────────────────────────────────────
+
+  @doc "List active buckets for a user with HOT/WARM/COLD counts."
+  def list_buckets(user_id \\ @default_user) do
+    buckets = Librarian.ColdStore.list_buckets(user_id)
+
+    buckets
+    |> Enum.map(fn b ->
+      full_hot = "#{user_id}:#{b.name}"
+
+      %{
+        name: b.name,
+        display_name: b.display_name,
+        created_at: b.created_at,
+        hot_count: Librarian.HotStore.count(full_hot),
+        warm_count:
+          WarmStore.all()
+          |> Enum.filter(&(&1.bucket == full_hot))
+          |> Enum.count(&is_nil(&1.superseded_by))
+      }
+    end)
+  end
+
+  @doc "Create a new bucket. Returns `{:ok, name}` or `{:error, reason}`."
+  def create_bucket(name, user_id \\ @default_user) do
+    Librarian.ColdStore.add_bucket(user_id, name)
+  end
+
+  @doc """
+  Rename a bucket. Updates the name across all three tiers.
+  Returns `{:ok, new_name}` or `{:error, reason}`.
+  """
+  def rename_bucket(old_name, new_name, user_id \\ @default_user) do
+    with {:ok, new_name} <- Librarian.ColdStore.rename_bucket(user_id, old_name, new_name) do
+      # Update WARM ETS bucket names
+      old_full = "#{user_id}:#{old_name}"
+      new_full = "#{user_id}:#{new_name}"
+      WarmStore.rename_bucket(old_full, new_full)
+
+      # Rename HOT GenServer (drain old, re-put under new)
+      Librarian.HotStore.rename(old_full, new_full)
+
+      {:ok, new_name}
+    end
+  end
+
+  @doc """
+  Delete a bucket. Archives WARM memories to COLD, discards HOT data,
+  and soft-deletes the bucket from the user's active list.
+  Returns `{:ok, archived_count}` or `{:error, reason}`.
+  """
+  def delete_bucket(name, user_id \\ @default_user) do
+    with {:ok, _name} <- Librarian.ColdStore.remove_bucket(user_id, name) do
+      # Archive WARM memories to COLD
+      archived = WarmStore.archive_bucket(user_id, name)
+
+      # Terminate HOT bucket and discard data
+      full_hot = "#{user_id}:#{name}"
+      Librarian.HotStore.terminate_bucket(full_hot)
+
+      {:ok, archived}
+    end
   end
 end

@@ -30,8 +30,6 @@ defmodule Librarian.Router do
                     cost price cloud alibaba qwen coupon token spend)}
   ]
 
-  @valid_buckets ["project", "research", "ideas", "thoughts", "finance", "inbox"]
-
   @doc """
   Ingest-time namespacing only. Returns `{bucket, hint_tags}` where bucket
   is always `"user_id:inbox"` — HOT is a buffer, classification is deferred
@@ -44,7 +42,7 @@ defmodule Librarian.Router do
 
   @doc """
   Deterministic keyword classifier used by the Stub curator (tests, no
-  network). Returns a bare bucket name from `@valid_buckets`, defaulting to
+  network). Returns a bare bucket name from the default set, defaulting to
   `"inbox"` when nothing matches. Word-boundary matching only — "we" must
   not match inside "weather" (a real bug we fixed long ago).
   """
@@ -66,13 +64,21 @@ defmodule Librarian.Router do
     end
   end
 
-  @doc "Validate/normalize a curator-provided bucket name; unknown values fall back to inbox."
-  def normalize_bucket(name) when is_binary(name) do
+  @doc """
+  Validate/normalize a curator-provided bucket name against the user's
+  active bucket list. Unknown values fall back to "inbox".
+  """
+  def normalize_bucket(name, user_id \\ "local") when is_binary(name) do
     bare = name |> String.downcase() |> String.trim()
-    if bare in @valid_buckets, do: bare, else: "inbox"
+
+    if bare in Librarian.ColdStore.valid_bucket_names(user_id) do
+      bare
+    else
+      "inbox"
+    end
   end
 
-  def normalize_bucket(_), do: "inbox"
+  def normalize_bucket(_, _user_id), do: "inbox"
 
   # Word-boundary match, not raw substring — "we" must not match inside
   # "weather", "i" must not match inside "nothing". This was a real bug

@@ -133,13 +133,26 @@ defmodule Librarian.ColdStore do
         [memory_id, depth]
       )
 
-    result.rows |> Enum.map(&row_to_relationship/1)
+    result.rows |> Enum.map(&row_to_ancestry/1)
   end
 
   defp row_to_relationship(row) do
-    [source_id, target_id, relationship_type, metadata_json, created_at] = row
+    [_id, source_id, target_id, relationship_type, metadata_json, created_at] = row
 
     %{
+      source_id: source_id,
+      target_id: target_id,
+      type: relationship_type,
+      metadata: decode_json_map(metadata_json),
+      created_at: created_at
+    }
+  end
+
+  defp row_to_ancestry(row) do
+    [depth, source_id, target_id, relationship_type, metadata_json, created_at, _path] = row
+
+    %{
+      depth: depth,
       source_id: source_id,
       target_id: target_id,
       type: relationship_type,
@@ -159,6 +172,245 @@ defmodule Librarian.ColdStore do
       {:ok, map} when is_map(map) -> map
       _ -> %{}
     end
+  end
+
+  # ── Bucket CRUD ────────────────────────────────────────────────────
+
+  @default_buckets ["inbox", "project", "research", "ideas", "thoughts", "finance"]
+  @system_buckets ["inbox"]
+
+  @doc """
+  List active (non-deleted) buckets for a user.
+  Lazily seeds defaults on first access.
+  """
+  def list_buckets(user_id) when is_binary(user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    {:ok, result} =
+      Exqlite.query(
+        conn,
+        "SELECT name, display_name, created_at FROM buckets WHERE deleted_at IS NULL ORDER BY name",
+        []
+      )
+
+    result.rows
+    |> Enum.map(fn [name, display_name, created_at] ->
+      %{name: name, display_name: display_name || name, created_at: created_at}
+    end)
+  end
+
+  @doc """
+  List all buckets including soft-deleted ones.
+  """
+  def list_buckets(user_id, include_deleted: true) when is_binary(user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    {:ok, result} =
+      Exqlite.query(
+        conn,
+        "SELECT name, display_name, created_at, deleted_at FROM buckets ORDER BY name",
+        []
+      )
+
+    result.rows
+    |> Enum.map(fn [name, display_name, created_at, deleted_at] ->
+      %{name: name, display_name: display_name || name, created_at: created_at, deleted_at: deleted_at}
+    end)
+  end
+
+  @doc """
+  Add a new bucket for a user. Returns `{:ok, bucket_name}` or `{:error, reason}`.
+  """
+  def add_bucket(user_id, name) when is_binary(user_id) and is_binary(name) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    name = String.trim(String.downcase(name))
+
+    cond do
+      name == "" ->
+        {:error, :name_empty}
+
+      name in @system_buckets ->
+        {:error, :reserved_name}
+
+      true ->
+        # Check limit
+        max_buckets = Application.get_env(:librarian, :max_buckets_per_user, 30)
+
+        {:ok, %{rows: [[count]]}} =
+          Exqlite.query(
+            conn,
+            "SELECT COUNT(*) FROM buckets WHERE deleted_at IS NULL",
+            []
+          )
+
+        if count >= max_buckets do
+          {:error, {:bucket_limit_reached, max_buckets}}
+        else
+          case Exqlite.query(
+                 conn,
+                 "INSERT OR IGNORE INTO buckets (name, display_name) VALUES (?1, ?1)",
+                 [name]
+               ) do
+            {:ok, _} -> {:ok, name}
+            {:error, reason} -> {:error, reason}
+          end
+        end
+    end
+  end
+
+  @doc """
+  Rename a bucket. Returns `{:ok, new_name}` or `{:error, reason}`.
+  Preserves relationship graph edges by updating the bucket field on all memories.
+  """
+  def rename_bucket(user_id, old_name, new_name) when is_binary(user_id) and is_binary(old_name) and is_binary(new_name) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    new_name = String.trim(String.downcase(new_name))
+
+    cond do
+      old_name in @system_buckets ->
+        {:error, :cannot_modify_system_bucket}
+
+      new_name == "" ->
+        {:error, :name_empty}
+
+      new_name in @system_buckets ->
+        {:error, :reserved_name}
+
+      true ->
+        # Check old bucket exists
+        {:ok, %{rows: [[count]]}} =
+          Exqlite.query(
+            conn,
+            "SELECT COUNT(*) FROM buckets WHERE name = ?1 AND deleted_at IS NULL",
+            [old_name]
+          )
+
+        if count == 0 do
+          {:error, :not_found}
+        else
+          # Check new name doesn't already exist
+          {:ok, %{rows: [[existing]]}} =
+            Exqlite.query(
+              conn,
+              "SELECT COUNT(*) FROM buckets WHERE name = ?1",
+              [new_name]
+            )
+
+          if existing > 0 do
+            {:error, :already_exists}
+          else
+            # Step 1: Update COLD memories table
+            Exqlite.query(
+              conn,
+              "UPDATE memories SET bucket = ?1 WHERE bucket = ?2",
+              [new_name, old_name]
+            )
+
+            # Step 2: Update buckets table
+            Exqlite.query(
+              conn,
+              "UPDATE buckets SET name = ?1, display_name = ?1 WHERE name = ?2",
+              [new_name, old_name]
+            )
+
+            {:ok, new_name}
+          end
+        end
+    end
+  end
+
+  @doc """
+  Soft-delete a bucket. Returns `{:ok, name}` or `{:error, reason}`.
+  Memories in the bucket are preserved with their bucket field intact.
+  Relationship graph edges are NOT severed — archived memories remain queryable.
+  """
+  def remove_bucket(user_id, name) when is_binary(user_id) and is_binary(name) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    name = String.trim(String.downcase(name))
+
+    cond do
+      name in @system_buckets ->
+        {:error, :cannot_modify_system_bucket}
+
+      true ->
+        {:ok, %{rows: [[count]]}} =
+          Exqlite.query(
+            conn,
+            "SELECT COUNT(*) FROM buckets WHERE name = ?1 AND deleted_at IS NULL",
+            [name]
+          )
+
+        if count == 0 do
+          {:error, :not_found}
+        else
+          Exqlite.query(
+            conn,
+            "UPDATE buckets SET deleted_at = datetime('now') WHERE name = ?1",
+            [name]
+          )
+
+          {:ok, name}
+        end
+    end
+  end
+
+  @doc """
+  Check if a bucket name exists and is active for a user.
+  """
+  def bucket_exists?(user_id, name) when is_binary(user_id) and is_binary(name) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    {:ok, %{rows: [[count]]}} =
+      Exqlite.query(
+        conn,
+        "SELECT COUNT(*) FROM buckets WHERE name = ?1 AND deleted_at IS NULL",
+        [name]
+      )
+
+    count > 0
+  end
+
+  @doc """
+  Get all active bucket names for a user. Used by Router.normalize_bucket/2.
+  """
+  def valid_bucket_names(user_id) when is_binary(user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    seed_default_buckets(conn)
+
+    {:ok, result} =
+      Exqlite.query(
+        conn,
+        "SELECT name FROM buckets WHERE deleted_at IS NULL",
+        []
+      )
+
+    result.rows |> Enum.map(fn [name] -> name end)
+  end
+
+  defp seed_default_buckets(conn) do
+    {:ok, %{rows: [[count]]}} =
+      Exqlite.query(conn, "SELECT COUNT(*) FROM buckets", [])
+
+    if count == 0 do
+      Enum.each(@default_buckets, fn name ->
+        Exqlite.query(
+          conn,
+          "INSERT OR IGNORE INTO buckets (name, display_name) VALUES (?1, ?1)",
+          [name]
+        )
+      end)
+    end
+
+    :ok
   end
 
   # ── Memory archive (SQLite) ────────────────────────────────────────

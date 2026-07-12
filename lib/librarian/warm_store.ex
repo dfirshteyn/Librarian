@@ -489,6 +489,42 @@ defmodule Librarian.WarmStore do
     )
   end
 
+  @doc """
+  Rename a bucket across all WARM memories in ETS.
+  Updates the bucket field on every memory matching the old bucket name.
+  """
+  def rename_bucket(old_bucket, new_bucket) do
+    all()
+    |> Enum.filter(&(&1.bucket == old_bucket))
+    |> Enum.each(fn memory ->
+      updated = %{memory | bucket: new_bucket}
+      :ets.insert(@table, {memory.id, updated})
+    end)
+
+    dump()
+    :ok
+  end
+
+  @doc """
+  Archive all memories in a bucket to COLD, then forget them from WARM.
+  Used during bucket deletion. Returns count of archived memories.
+  """
+  def archive_bucket(user_id, bucket_name) do
+    full_bucket_prefix = "#{user_id}:#{bucket_name}"
+
+    memories =
+      all()
+      |> Enum.filter(&(&1.bucket == full_bucket_prefix))
+      |> Enum.reject(& &1.superseded_by)
+
+    Enum.each(memories, fn memory ->
+      Librarian.ColdStore.archive(memory, user_id)
+      forget(memory.id)
+    end)
+
+    length(memories)
+  end
+
   defp bump_access(memory) do
     updated = %{
       memory

@@ -63,6 +63,57 @@ defmodule Librarian.HotStore do
     end
   end
 
+  @doc """
+  Rename a HOT bucket: drain old name and re-put under new name.
+  If the old bucket has no data, this is a no-op.
+  """
+  def rename(old_bucket, new_bucket) do
+    payloads = drain(old_bucket)
+
+    case payloads do
+      [] ->
+        :ok
+
+      _ ->
+        ensure_started(new_bucket)
+        Enum.each(payloads, fn payload ->
+          Librarian.Wal.append(new_bucket, payload)
+          GenServer.cast(via(new_bucket), {:put, payload})
+        end)
+
+        # Terminate the old bucket's GenServer
+        case Registry.lookup(@registry, old_bucket) do
+          [{pid, _}] ->
+            DynamicSupervisor.terminate_child(Librarian.BucketSupervisor, pid)
+            Librarian.Wal.truncate(old_bucket)
+
+          [] ->
+            :ok
+        end
+
+        :ok
+    end
+  end
+
+  @doc """
+  Terminate a HOT bucket's GenServer and drop its WAL.
+  Called during bucket deletion.
+  """
+  def terminate_bucket(bucket) do
+    # Drain first (discard data on explicit delete)
+    _ = drain(bucket)
+
+    case Registry.lookup(@registry, bucket) do
+      [{pid, _}] ->
+        DynamicSupervisor.terminate_child(Librarian.BucketSupervisor, pid)
+        Librarian.Wal.truncate(bucket)
+        :ok
+
+      [] ->
+        :ok
+    end
+  end
+
   def ensure_started(bucket) do
     case Registry.lookup(@registry, bucket) do
       [{_pid, _}] ->
