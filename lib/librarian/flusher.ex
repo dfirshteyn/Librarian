@@ -52,6 +52,12 @@ defmodule Librarian.Flusher do
                 warm_bucket = "#{user_id}:#{normalized}"
                 memory = Librarian.WarmStore.put(warm_bucket, result, correlation_id: payload.parent_id)
                 Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
+
+                # Notify ChunkTracker if this was a chunked payload
+                if payload.parent_id do
+                  Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
+                end
+
                 {:ok, memory}
 
               {:error, reason} ->

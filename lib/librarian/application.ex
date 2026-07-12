@@ -15,6 +15,8 @@ defmodule Librarian.Application do
         Librarian.Repo,
         {Task.Supervisor, name: Librarian.TaskSupervisor},
         {Phoenix.PubSub, name: Librarian.PubSub},
+        Librarian.ChunkTracker,
+        Librarian.ParentSummarizer,
         Librarian.Consolidation.AutomationServer,
         LibrarianWeb.Endpoint
       ]

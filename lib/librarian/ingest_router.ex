@@ -125,6 +125,12 @@ defmodule Librarian.IngestRouter do
       correlation_id: correlation_id
     )
 
+    total_chunks = length(chunks)
+
+    # Register with ChunkTracker BEFORE dispatching any concurrent ingestion
+    # This is synchronous to prevent race where chunks arrive before registration
+    :ok = Librarian.ChunkTracker.register_chunks(correlation_id, total_chunks, user_id)
+
     # Process chunks concurrently
     results =
       chunks
