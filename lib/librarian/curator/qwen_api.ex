@@ -18,9 +18,10 @@ defmodule Librarian.Curator.QwenApi do
   @behaviour Librarian.Curator
 
   @base_url "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-  @model "qwen-max"
+  @model "qwen3.7-max-preview"
 
   @impl true
+  @spec summarize(maybe_improper_list()) :: {:error, any()} | {:ok, Librarian.Curator.Result.t()}
   def summarize(chunk) when is_list(chunk) do
     text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
@@ -86,16 +87,40 @@ defmodule Librarian.Curator.QwenApi do
     """
   end
 
-  defp chat(prompt) do
+  @doc """
+  Internal chat function with optional temperature and system prompt support.
+  Used by Council modules for persona-based calls.
+  """
+  def chat(prompt, opts \\ []) when is_binary(prompt) and is_list(opts) do
     api_key =
       Application.get_env(:librarian, :dashscope_api_key) ||
         raise "DASHSCOPE_API_KEY not set — export it or add to runtime.exs"
 
-    body = %{
-      "model" => @model,
-      "messages" => [%{"role" => "user", "content" => prompt}],
-      "response_format" => %{"type" => "json_object"}
-    }
+    messages =
+      case Keyword.get(opts, :system_prompt) do
+        nil -> [%{"role" => "user", "content" => prompt}]
+        prompt_text -> [
+          %{"role" => "system", "content" => prompt_text},
+          %{"role" => "user", "content" => prompt}
+        ]
+      end
+
+    temperature = Keyword.get(opts, :temperature)
+
+    body =
+      case temperature do
+        nil -> %{
+          "model" => @model,
+          "messages" => messages,
+          "response_format" => %{"type" => "json_object"}
+        }
+        _ -> %{
+          "model" => @model,
+          "messages" => messages,
+          "response_format" => %{"type" => "json_object"},
+          "temperature" => temperature
+        }
+      end
 
     case Req.post(req(),
            url: "#{@base_url}/chat/completions",

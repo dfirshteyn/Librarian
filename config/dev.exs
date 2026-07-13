@@ -29,6 +29,7 @@ config :librarian, :start_ws_server, false
 config :librarian, curator: Librarian.Curator.Hybrid
 config :librarian, llama_cpp_url: "http://localhost:1234/v1"
 config :librarian, embed_url: "http://localhost:1235/v1"
+config :librarian, :council_llama_cpp_url, "http://localhost:1236/v1"
 config :librarian, llama_cpp_timeout_ms: 120_000
 
 # Consolidation curator: use Stub in dev so we don't need API keys locally

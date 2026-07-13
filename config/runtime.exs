@@ -1,20 +1,23 @@
 import Config
 
-# Load .env file if present (dev convenience — never commit secrets)
-dotenv = Path.join(File.cwd!(), ".env")
+# Load .env and .env.local files if present (dev convenience — never commit secrets)
+# .env.local takes precedence over .env
+Enum.each([".env.local", ".env"], fn filename ->
+  dotenv_path = Path.join(File.cwd!(), filename)
 
-if File.exists?(dotenv) do
-  dotenv
-  |> File.read!()
-  |> String.split("\n", trim: true)
-  |> Enum.reject(&String.starts_with?(&1, "#"))
-  |> Enum.each(fn line ->
-    case String.split(line, "=", parts: 2) do
-      [k, v] -> System.put_env(String.trim(k), String.trim(v))
-      _ -> :ok
-    end
-  end)
-end
+  if File.exists?(dotenv_path) do
+    dotenv_path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.reject(&String.starts_with?(&1, "#"))
+    |> Enum.each(fn line ->
+      case String.split(line, "=", parts: 2) do
+        [k, v] -> System.put_env(String.trim(k), String.trim(v))
+        _ -> :ok
+      end
+    end)
+  end
+end)
 
 if api_key = System.get_env("DASHSCOPE_API_KEY") do
   config :librarian, dashscope_api_key: api_key

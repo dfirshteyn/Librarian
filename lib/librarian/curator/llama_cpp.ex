@@ -32,13 +32,13 @@ defmodule Librarian.Curator.LlamaCpp do
     text =
       chunk
       |> Enum.map(& &1.raw_text)
-      |> Enum.join("\n---\n")
+      |> Enum.join("\\n---\\n")
       |> sanitize_for_prompt()
 
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
     url = get_url(chunk)
 
-    with {:ok, body} <- chat(prompt, url),
+    with {:ok, body} <- chat(prompt, url: url, temperature: 0.1),
          {:ok, result} <- parse_result(body) do
       bucket = fallback_bucket(result.bucket, text)
       cleaned = %{result | facts: deduplicate_facts(result.facts, result.summary), bucket: bucket}
@@ -78,6 +78,49 @@ defmodule Librarian.Curator.LlamaCpp do
           _ ->
             {:error, :missing_embedding}
         end
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, {:api_error, status, resp_body}}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  @doc """
+  Internal chat function with optional temperature and system prompt support.
+  Used by Council modules for persona-based calls.
+  """
+  def chat(prompt, opts \\ []) when is_binary(prompt) and is_list(opts) do
+    url = Keyword.get(opts, :url, council_url())
+    temperature = Keyword.get(opts, :temperature, 0.1)
+
+    {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
+
+    messages =
+      case Keyword.get(opts, :system_prompt) do
+        nil -> [%{"role" => "user", "content" => scrubbed_prompt}]
+        prompt_text -> [
+          %{"role" => "system", "content" => prompt_text},
+          %{"role" => "user", "content" => scrubbed_prompt}
+        ]
+      end
+
+    body = %{
+      "model" => model_name(),
+      "messages" => messages,
+      "response_format" => %{"type" => "json_object"},
+      "temperature" => temperature,
+      "max_tokens" => 512
+    }
+
+    case Req.post(req(),
+           url: "#{url}/chat/completions",
+           json: body,
+           receive_timeout: 120_000
+         ) do
+      {:ok, %{status: 200, body: resp_body}} ->
+        {:ok, resp_body}
 
       {:ok, %{status: status, body: resp_body}} ->
         {:error, {:api_error, status, resp_body}}
@@ -151,29 +194,8 @@ defmodule Librarian.Curator.LlamaCpp do
     end
   end
 
-  defp chat(prompt, url) do
-    body = %{
-      "model" => model_name(),
-      "messages" => [%{"role" => "user", "content" => prompt}],
-      "response_format" => %{"type" => "json_object"},
-      "temperature" => 0.1,
-      "max_tokens" => 512
-    }
-
-    case Req.post(req(),
-           url: "#{url}/chat/completions",
-           json: body,
-           receive_timeout: 120_000
-         ) do
-      {:ok, %{status: 200, body: resp_body}} ->
-        {:ok, resp_body}
-
-      {:ok, %{status: status, body: resp_body}} ->
-        {:error, {:api_error, status, resp_body}}
-
-      {:error, reason} ->
-        {:error, {:http_error, reason}}
-    end
+  defp council_url do
+    Application.get_env(:librarian, :council_llama_cpp_url, "http://localhost:1234/v1")
   end
 
   defp base_url do

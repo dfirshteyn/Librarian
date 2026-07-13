@@ -186,6 +186,45 @@ defmodule Librarian.McpServer do
           "type" => "object",
           "properties" => %{}
         }
+      },
+      %{
+        "name" => "council_deliberate",
+        "description" =>
+          "Run the multi-agent Council on text content: each persona independently analyzes through their lens, then jury synthesizes into final memory.",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "content" => %{"type" => "string", "description" => "The text content to analyze"},
+            "text" => %{"type" => "string", "description" => "Alternative name for content"}
+          },
+          "required" => ["content"]
+        }
+      },
+      %{
+        "name" => "council_stage_one",
+        "description" =>
+          "Get individual persona perspectives without jury synthesis. Useful for debugging or seeing how each lens interprets the content.",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "content" => %{"type" => "string", "description" => "The text content to analyze"},
+            "text" => %{"type" => "string", "description" => "Alternative name for content"}
+          },
+          "required" => ["content"]
+        }
+      },
+      %{
+        "name" => "council_on_memory",
+        "description" =>
+          "Run Council on an existing memory by ID. Fetches the memory and runs full deliberation.",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "memory_id" => %{"type" => "integer", "description" => "The memory ID to deliberate on"},
+            "id" => %{"type" => "integer", "description" => "Alternative name for memory_id"}
+          },
+          "required" => ["memory_id"]
+        }
       }
     ]
 
@@ -281,13 +320,47 @@ defmodule Librarian.McpServer do
     tool_result(%{"ok" => true, "results" => inspect(results)})
   end
 
-  defp call_tool("briefing", args) do
-    limit = args["limit"] || 5
-    tool_result(%{"insights" => Librarian.morning_briefing(limit)})
-  end
+  # defp call_tool("briefing", args) do
+  #   limit = args["limit"] || 5
+  #   tool_result(%{"insights" => Librarian.morning_briefing(limit)})
+  # end
 
   defp call_tool("nightly_pass", _args) do
     tool_result(%{"ok" => true, "result" => Librarian.Flusher.nightly_pass()})
+  end
+
+  defp call_tool("council_deliberate", args) do
+    content = args["content"] || args["text"]
+
+    if is_binary(content) and content != "" do
+      result = Librarian.Council.deliberate(content)
+      tool_result(%{"result" => result})
+    else
+      tool_result(%{"error" => "missing content argument"})
+    end
+  end
+
+  defp call_tool("council_stage_one", args) do
+    content = args["content"] || args["text"]
+
+    if is_binary(content) and content != "" do
+      takes = Librarian.Council.stage_one(content)
+      tool_result(%{"takes" => takes})
+    else
+      tool_result(%{"error" => "missing content argument"})
+    end
+  end
+
+  defp call_tool("council_on_memory", args) do
+    memory_id = args["memory_id"] || args["id"]
+
+    if is_integer(memory_id) or (is_binary(memory_id) and memory_id =~ ~r/^\d+$/) do
+      memory_id = if is_binary(memory_id), do: String.to_integer(memory_id), else: memory_id
+      result = Librarian.Council.deliberate_on_memory(memory_id)
+      tool_result(%{"result" => result})
+    else
+      tool_result(%{"error" => "missing or invalid memory_id argument"})
+    end
   end
 
   defp call_tool(name, _args) do
