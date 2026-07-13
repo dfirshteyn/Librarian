@@ -174,12 +174,60 @@ defmodule Librarian.Council do
   end
 
   defp build_context_from_memory(memory) do
-    """
+    user_id = memory.bucket |> String.split(":", parts: 2) |> List.first()
+
+    # Parent section: the memory's own summary and facts (the compressed view)
+    parent_section = """
     #{memory.summary || ""}
 
     Facts: #{Enum.join(memory.facts || [], ". ")}
     """
+
+    # Children grounding section: raw chunk summaries from 1-hop graph neighbors
+    children_section = build_children_context(memory, user_id)
+
+    if children_section == "" do
+      parent_section
+    else
+      """
+      #{parent_section}
+
+      ### DETAILED SOURCE MATERIAL FROM CHILD CHUNKS:
+      #{children_section}
+      """
+    end
   end
+
+  defp build_children_context(memory, user_id) when is_binary(user_id) do
+    memory_id_str = to_string(memory.id)
+
+    %{incoming: incoming} = Librarian.ColdStore.get_memory_lineage(memory_id_str, user_id)
+
+    child_ids =
+      incoming
+      |> Enum.filter(fn r -> r.type == "chunk_of" end)
+      |> Enum.map(fn r -> r.source_id end)
+
+    child_ids
+    |> Enum.map(fn id_str ->
+      case Integer.parse(id_str) do
+        {int_id, ""} -> Librarian.WarmStore.get(int_id)
+        _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {chunk, idx} ->
+      """
+      --- Source Chunk ##{idx} ---
+      #{chunk.summary || ""}
+      Facts: #{Enum.join(chunk.facts || [], ". ")}
+      """
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp build_children_context(_memory, _user_id), do: ""
 
   defp parse_take(body) do
     with content when is_binary(content) <-
