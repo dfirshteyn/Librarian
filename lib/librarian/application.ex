@@ -13,6 +13,7 @@ defmodule Librarian.Application do
          strategy: :one_for_one, name: Librarian.ColdStore.ConnectionSupervisor},
         Librarian.WarmStore,
         Librarian.Repo,
+        Librarian.PublicRepo,
         {Task.Supervisor, name: Librarian.TaskSupervisor},
         {Phoenix.PubSub, name: Librarian.PubSub},
         Librarian.ChunkTracker,

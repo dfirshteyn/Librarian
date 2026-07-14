@@ -9,6 +9,7 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
   import LibrarianWeb.Dashboard.Components.InsightsPanel
   import LibrarianWeb.Dashboard.Components.AncestryModal
+  import LibrarianWeb.Dashboard.Components.PublicGraph
 
   alias Librarian.{WarmStore, HotStore, Flusher}
 
@@ -585,6 +586,7 @@ defmodule LibrarianWeb.DashboardLive do
 
       <div class="grid grid-cols-2 gap-4" style="height: calc(50vh - 160px);">
         <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} />
+        <.live_component module={LibrarianWeb.Dashboard.Components.PublicGraph} id="public_graph" />
       </div>
 
       <%= if @ancestry_memory_id do %>

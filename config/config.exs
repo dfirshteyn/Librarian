@@ -23,7 +23,11 @@ config :librarian,
 # Ecto repo
 config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.db"
 
-config :librarian, ecto_repos: [Librarian.Repo]
+config :librarian, ecto_repos: [Librarian.Repo, Librarian.PublicRepo]
+
+# PublicRepo uses a separate migrations path to avoid conflict with SQLite repo
+config :librarian, Librarian.PublicRepo,
+  migrations_path: "priv/public_repo/migrations"
 
 # Phoenix endpoint
 config :librarian, LibrarianWeb.Endpoint,

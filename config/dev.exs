@@ -6,6 +6,16 @@ config :librarian, Librarian.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
+# Postgres public graph — defaults to local PG on standard port
+# Override via DATABASE_PUBLIC_URL env var in runtime.exs
+config :librarian, Librarian.PublicRepo,
+  hostname: System.get_env("PGHOST", "localhost"),
+  port: String.to_integer(System.get_env("PGPORT", "5432")),
+  username: System.get_env("PGUSER", "postgres"),
+  password: System.get_env("PGPASSWORD", "postgres"),
+  database: System.get_env("PGDATABASE", "librarian_public"),
+  pool_size: 2
+
 config :librarian, LibrarianWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
   check_origin: false,

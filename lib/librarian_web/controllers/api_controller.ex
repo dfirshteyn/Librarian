@@ -416,6 +416,77 @@ defmodule LibrarianWeb.ApiController do
     conn |> put_status(422) |> json(%{ok: false, error: "missing name", user_id: user_id})
   end
 
+  @doc """
+  GET /api/network
+
+  Returns the full public graph — nodes and edges — for the dashboard
+  visualization. No auth required (public data).
+  """
+  def public_graph(conn, _params) do
+    graph = Librarian.Network.get_graph()
+    json(conn, Map.put(graph, :ok, true))
+  end
+
+  @doc """
+  POST /api/network/publish
+
+  Publish a Council deliberation result to the public graph.
+  Body: {"summary": "...", "importance": 0.8, "bucket": "research",
+         "facts": [...], "tags": [...], "embedding": [384 floats...]}
+
+  Requires a valid embedding vector. The publisher's anonymous X-User-Id
+  hash is recorded if available.
+  """
+  def publish_to_network(conn, params) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      embedding = params["embedding"]
+
+      cond do
+        is_nil(embedding) or not is_list(embedding) ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "missing or invalid embedding (requires list of 384 floats)"})
+
+        length(embedding) != 384 ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "embedding must be exactly 384 floats"})
+
+        is_nil(params["summary"]) ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "missing required field: summary"})
+
+        true ->
+          artifact = %{
+            "summary" => params["summary"],
+            "importance" => params["importance"] || 0.5,
+            "bucket" => params["bucket"] || "inbox",
+            "facts" => params["facts"] || [],
+            "tags" => params["tags"] || [],
+            "metadata" => params["metadata"] || %{}
+          }
+
+          case Librarian.Network.publish(artifact, embedding, user_id) do
+            {:ok, hash_id} ->
+              json(conn, %{ok: true, hash_id: hash_id})
+
+            {:error, reason} ->
+              conn
+              |> put_status(422)
+              |> json(%{ok: false, error: inspect(reason)})
+          end
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
   # Multipart file handling
 
   defp has_multipart?(conn) do

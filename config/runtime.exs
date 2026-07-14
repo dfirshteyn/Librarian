@@ -32,6 +32,15 @@ if config_env() == :prod do
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
+  # Postgres public graph — separate from SQLite private sandbox
+  public_database_url =
+    System.get_env("DATABASE_PUBLIC_URL") ||
+      raise "DATABASE_PUBLIC_URL env var is required in prod"
+
+  config :librarian, Librarian.PublicRepo,
+    url: public_database_url,
+    pool_size: String.to_integer(System.get_env("PUBLIC_POOL_SIZE") || "5")
+
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
       raise "SECRET_KEY_BASE env var is required in prod"

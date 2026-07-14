@@ -24,7 +24,9 @@ defmodule Librarian.MixProject do
     [
       setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["tailwind librarian", "esbuild librarian"]
+      "assets.build": ["tailwind librarian", "esbuild librarian"],
+      "ecto.setup": ["ecto.create", "ecto.migrate"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"]
     ]
   end
 
@@ -42,6 +44,9 @@ defmodule Librarian.MixProject do
       # SQLite for COLD store
       {:exqlite, "~> 0.23"},
       {:ecto_sqlite3, "~> 0.17"},
+      # Postgres for public graph network
+      {:postgrex, "~> 0.19"},
+      {:pgvector, "~> 0.3"},
       # ML
       {:nx, "~> 0.12.0"},
       {:exla, "~> 0.12.0"},
