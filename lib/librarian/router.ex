@@ -68,7 +68,9 @@ defmodule Librarian.Router do
   Validate/normalize a curator-provided bucket name against the user's
   active bucket list. Unknown values fall back to "inbox".
   """
-  def normalize_bucket(name, user_id \\ "local") when is_binary(name) do
+  def normalize_bucket(name, user_id \\ "local")
+
+  def normalize_bucket(name, user_id) when is_binary(name) do
     bare = name |> String.downcase() |> String.trim()
 
     if bare in Librarian.ColdStore.valid_bucket_names(user_id) do

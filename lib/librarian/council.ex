@@ -19,7 +19,7 @@ defmodule Librarian.Council do
 
   Returns {:ok, final_result} or {:error, reason}
   """
-  @spec deliberate(String.t()) :: {:ok, map()} | {:error, term()}
+  @spec deliberate(String.t()) :: {:ok, %{synthesis: String.t(), persona_takes: %{optional(atom()) => String.t()}, failures: list()}} | {:error, term()}
   def deliberate(content) when is_binary(content) do
     personas = Persona.available_personas()
 
@@ -113,7 +113,7 @@ defmodule Librarian.Council do
   @doc """
   Run Council on a memory ID - fetches the memory and runs deliberation.
   """
-  @spec deliberate_on_memory(integer()) :: {:ok, map()} | {:error, term()}
+  @spec deliberate_on_memory(integer()) :: {:ok, %{synthesis: String.t(), persona_takes: %{optional(atom()) => String.t()}, failures: list()}} | {:error, term()}
   def deliberate_on_memory(memory_id) when is_integer(memory_id) do
     case Librarian.WarmStore.get(memory_id) do
       nil ->

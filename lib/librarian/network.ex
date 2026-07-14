@@ -90,7 +90,7 @@ defmodule Librarian.Network do
     end
   end
 
-  def publish(artifact, _embedding_vector, _publisher_hash) do
+  def publish(_artifact, _embedding_vector, _publisher_hash) do
     {:error, :invalid_artifact, "Missing required key: summary"}
   end
 

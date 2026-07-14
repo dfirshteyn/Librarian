@@ -13,6 +13,10 @@ defmodule Librarian.WarmStore.Memory do
     :last_accessed_at,
     :superseded_by,
     :correlation_id,
+    :council,
+    :publish_hash,
+    published: false,
+    locked: false,
     access_count: 0
   ]
 end
@@ -252,6 +256,23 @@ defmodule Librarian.WarmStore do
   end
 
   @doc """
+  Update arbitrary fields on a memory in-place. Used by the delegation /
+  publish flow to set `council`, `published`, `publish_hash`, and `locked`
+  without disturbing the rest of the record.
+  """
+  def update(id, changes) when is_map(changes) do
+    GenServer.call(__MODULE__, {:update, id, changes})
+  end
+
+  @doc "True if the memory is hard-locked (delegate/publish in flight or failed mid-write)."
+  def locked?(id) do
+    case :ets.lookup(@table, id) do
+      [{^id, memory}] -> memory.locked
+      [] -> false
+    end
+  end
+
+  @doc """
   Apply decay to every memory's importance, but NOT uniformly:
 
     - Buckets configured with `:decay` (the default — "ideas", "thoughts",
@@ -313,6 +334,10 @@ defmodule Librarian.WarmStore do
           last_accessed_at: DateTime.to_iso8601(m.last_accessed_at),
           superseded_by: m.superseded_by,
           correlation_id: m.correlation_id,
+          council: m.council,
+          publish_hash: m.publish_hash,
+          published: m.published,
+          locked: m.locked,
           access_count: m.access_count
         }) <> "\n"
       end)
@@ -351,10 +376,14 @@ defmodule Librarian.WarmStore do
               importance: map["importance"] || 0.5,
               created_at: created,
               last_accessed_at: accessed,
-              superseded_by: map["superseded_by"],
-              correlation_id: map["correlation_id"],
-              access_count: map["access_count"] || 0
-            }
+               superseded_by: map["superseded_by"],
+               correlation_id: map["correlation_id"],
+               council: map["council"],
+               publish_hash: map["publish_hash"],
+               published: map["published"] || false,
+               locked: map["locked"] || false,
+               access_count: map["access_count"] || 0
+             }
 
             GenServer.call(__MODULE__, {:load, memory})
 
@@ -431,6 +460,20 @@ defmodule Librarian.WarmStore do
     :ets.delete(table, id)
     dump()
     {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:update, id, changes}, _from, %{table: table} = state) do
+    case :ets.lookup(table, id) do
+      [{^id, memory}] ->
+        updated = Map.merge(memory, changes)
+        :ets.insert(table, {id, updated})
+        dump()
+        {:reply, :ok, state}
+
+      [] ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   @impl true

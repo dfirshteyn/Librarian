@@ -397,11 +397,6 @@ defmodule LibrarianWeb.ApiController do
           conn
           |> put_status(404)
           |> json(%{ok: false, error: "bucket not found", user_id: user_id})
-
-        {:error, reason} ->
-          conn
-          |> put_status(422)
-          |> json(%{ok: false, error: inspect(reason), user_id: user_id})
       end
     else
       {:error, :budget_exhausted} ->

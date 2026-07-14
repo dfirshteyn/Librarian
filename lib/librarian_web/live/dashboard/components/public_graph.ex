@@ -26,7 +26,6 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
     {:ok, assign_graph(socket)}
   end
 
-  @impl true
   def handle_info(:refresh_graph, socket) do
     {:noreply, assign_graph(socket)}
   end

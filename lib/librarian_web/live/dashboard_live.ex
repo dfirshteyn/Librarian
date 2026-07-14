@@ -9,8 +9,6 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
   import LibrarianWeb.Dashboard.Components.InsightsPanel
   import LibrarianWeb.Dashboard.Components.AncestryModal
-  import LibrarianWeb.Dashboard.Components.PublicGraph
-
   alias Librarian.{WarmStore, HotStore, Flusher}
 
   # ── Swarm / Flood demo texts ─────────────────────────────────────────
@@ -146,6 +144,7 @@ defmodule LibrarianWeb.DashboardLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "ingest")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush")
+      Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
       :timer.send_interval(2000, self(), :refresh_warm)
     end
 
@@ -170,6 +169,11 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:ancestry_memory_id, nil)
      |> assign(:ancestry_tree, [])
      |> assign(:structured_response, nil)
+     |> assign(:council_pending, MapSet.new())
+     |> assign(:publish_pending, MapSet.new())
+     |> assign(:delegation_progress, %{})
+     |> assign(:publish_confirm_id, nil)
+     |> assign(:publish_confirm_synthesis, nil)
      |> assign(
        :flush_concurrency,
        Application.get_env(:librarian, :parallel_flush_max_concurrency, 1)
@@ -217,6 +221,53 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:insights, Librarian.morning_briefing(20))
      |> assign(:token_savings, compute_token_savings(tid))}
+  end
+
+  # ── PublicGraph refresh tick ───────────────────────────────────────────
+  # :timer.send_interval in a LiveComponent's mount/1 sends to self(), which
+  # resolves to the *parent LiveView* PID (components share the LV process).
+  # We catch the tick here and forward it to the component via send_update/2,
+  # which triggers PublicGraph.update/2 and reloads graph data.
+  def handle_info(:refresh_graph, socket) do
+    send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "public_graph")
+    {:noreply, socket}
+  end
+
+  # ── Delegation / Publish progress ─────────────────────────────────
+
+  def handle_info({:council_progress, id, stage, pct}, socket) do
+    socket = update_progress(socket, :delegation_progress, id, stage, pct)
+
+    socket =
+      if stage == :done or stage == :error do
+        socket
+        |> update(:council_pending, &MapSet.delete(&1, id))
+        |> assign_memories(socket.assigns.tenant_id)
+      else
+        update(socket, :council_pending, &MapSet.put(&1, id))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:publish_progress, id, stage, pct}, socket) do
+    socket = update_progress(socket, :delegation_progress, id, stage, pct)
+
+    socket =
+      if stage == :done or stage == :error do
+        socket
+        |> update(:publish_pending, &MapSet.delete(&1, id))
+        |> assign_memories(socket.assigns.tenant_id)
+      else
+        update(socket, :publish_pending, &MapSet.put(&1, id))
+      end
+
+    {:noreply, socket}
+  end
+
+  defp update_progress(socket, key, id, stage, pct) do
+    current = socket.assigns[key]
+    assign(socket, key, Map.put(current, id, %{stage: stage, pct: pct}))
   end
 
   # ── Structured recall commands ─────────────────────────────────────
@@ -345,6 +396,119 @@ defmodule LibrarianWeb.DashboardLive do
     end)
 
     {:noreply, put_flash(socket, :info, "Consolidation sweep started for #{tid}")}
+  end
+
+  # ── Delegate to Council (single memory) ──────────────────────────
+  # Runs one memory at a time. Spawns async + broadcasts live progress
+  # over `delegation:#{tid}` so the card renders a loading bar. The
+  # memory is hard-locked inside Librarian.Delegation for the duration.
+  def handle_event("delegate_council", %{"id" => id}, socket) do
+    tid = socket.assigns.tenant_id
+    memory_id = String.to_integer(id)
+
+    # Skip if already in flight (idempotent against double-clicks)
+    if MapSet.member?(socket.assigns.council_pending, memory_id) do
+      {:noreply, socket}
+    else
+      socket = update(socket, :council_pending, &MapSet.put(&1, memory_id))
+
+      Task.start(fn ->
+        case Librarian.Delegation.delegate_to_council(memory_id, tid) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Phoenix.PubSub.broadcast(
+              Librarian.PubSub,
+              "delegation:#{tid}",
+              {:council_progress, memory_id, :error, 0}
+            )
+
+            Phoenix.LiveView.send_update(__MODULE__,
+              id: "dashboard",
+              flash: %{error: "Delegate failed: #{inspect(reason)}"}
+            )
+        end
+      end)
+
+      {:noreply, socket}
+    end
+  end
+
+  # ── Publish confirm modal state ─────────────────────────────────────
+  # The user must explicitly confirm publishing after seeing the actual
+  # synthesis text that will go public (with a privacy warning). Clicking
+  # "Publish" on the card just opens the modal; the async work only fires
+  # after the user clicks "Confirm Publish" inside the modal.
+
+  def handle_event("publish_memory", %{"id" => id}, socket) do
+    memory_id = String.to_integer(id)
+
+    # Guard: skip if already in flight or already published
+    if MapSet.member?(socket.assigns.publish_pending, memory_id) do
+      {:noreply, socket}
+    else
+      # Load the memory and open the confirm modal — do NOT publish yet.
+      memory = Librarian.WarmStore.get(memory_id)
+
+      if memory && memory.council && is_binary(memory.council[:synthesis]) do
+        {:noreply,
+         socket
+         |> assign(:publish_confirm_id, memory_id)
+         |> assign(:publish_confirm_synthesis, memory.council[:synthesis])}
+      else
+        {:noreply, put_flash(socket, :error, "Memory has no Council synthesis — delegate first.")}
+      end
+    end
+  end
+
+  def handle_event("cancel_publish", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:publish_confirm_id, nil)
+     |> assign(:publish_confirm_synthesis, nil)}
+  end
+
+  # ── Confirmed publish — this is where the actual async work fires ────
+  def handle_event("confirm_publish", %{"id" => id}, socket) do
+    tid = socket.assigns.tenant_id
+    memory_id = String.to_integer(id)
+
+    socket =
+      socket
+      |> assign(:publish_confirm_id, nil)
+      |> assign(:publish_confirm_synthesis, nil)
+      |> update(:publish_pending, &MapSet.put(&1, memory_id))
+
+    Task.start(fn ->
+      case Librarian.Delegation.publish_memory(memory_id, tid) do
+        {:ok, hash_id} ->
+          Phoenix.PubSub.broadcast(
+            Librarian.PubSub,
+            "delegation:#{tid}",
+            {:publish_progress, memory_id, :done, 100}
+          )
+
+          Phoenix.LiveView.send_update(__MODULE__,
+            id: "dashboard",
+            flash: %{info: "Published to public graph (#{String.slice(hash_id, 0, 12)})"}
+          )
+
+        {:error, reason} ->
+          Phoenix.PubSub.broadcast(
+            Librarian.PubSub,
+            "delegation:#{tid}",
+            {:publish_progress, memory_id, :error, 0}
+          )
+
+          Phoenix.LiveView.send_update(__MODULE__,
+            id: "dashboard",
+            flash: %{error: "Publish failed: #{inspect(reason)}"}
+          )
+      end
+    end)
+
+    {:noreply, socket}
   end
 
   def handle_event("manual_ingest", %{"text" => text, "bucket" => bucket}, socket)
@@ -547,6 +711,59 @@ defmodule LibrarianWeb.DashboardLive do
     end
   end
 
+  # ── Publish confirm modal ─────────────────────────────────────────────
+  # This is the deliberate UI gate: the user sees the actual synthesis text
+  # (exactly what will be written to Postgres as the public node summary)
+  # before anything is committed. The privacy warning is explicit: scrubbing
+  # reduces but does not guarantee zero leaked detail.
+
+  attr(:memory_id, :integer, required: true)
+  attr(:synthesis, :string, required: true)
+
+  def publish_confirm_modal(assigns) do
+    ~H"""
+    <div class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+         phx-key="Escape" phx-window-keydown="cancel_publish">
+      <div class="bg-gray-900 border border-emerald-600 rounded-xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+        <h2 class="text-sm font-bold text-emerald-400 uppercase tracking-wider">
+          🌐 Confirm Publish to Public Graph
+        </h2>
+
+        <p class="text-xs text-gray-400">
+          The following synthesis text will be written to the immutable public graph as
+          a permanent node. <strong class="text-amber-300">Review carefully</strong> — once
+          published this cannot be unpublished.
+        </p>
+
+        <div class="bg-gray-800 border border-gray-700 rounded p-3 max-h-48 overflow-y-auto">
+          <p class="text-xs text-gray-200 leading-relaxed"><%= @synthesis %></p>
+        </div>
+
+        <div class="bg-amber-950/60 border border-amber-700 rounded p-3">
+          <p class="text-[11px] text-amber-300 leading-relaxed">
+            ⚠️ <strong>Privacy notice:</strong> LeakGuard scrubs common secret patterns
+            (API keys, tokens, DB URLs) from this text before it was used by the Council.
+            Scrubbing <em>reduces</em> the risk of accidental leakage but is not a guarantee
+            against all personal or sensitive detail. You are responsible for the content
+            you publish to the public graph.
+          </p>
+        </div>
+
+        <div class="flex gap-3">
+          <button phx-click="cancel_publish"
+            class="flex-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2 rounded font-bold transition">
+            Cancel
+          </button>
+          <button phx-click="confirm_publish" phx-value-id={@memory_id}
+            class="flex-1 text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-2 rounded font-bold transition">
+            ✅ Confirm Publish
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -580,7 +797,7 @@ defmodule LibrarianWeb.DashboardLive do
 
       <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 160px);">
         <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} />
-        <.warm_cards tenant_id={@tenant_id} memories={@memories} expanded_memories={@expanded_memories} />
+        <.warm_cards tenant_id={@tenant_id} memories={@memories} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} />
         <.insights_panel insights={@insights} />
       </div>
 
@@ -591,6 +808,10 @@ defmodule LibrarianWeb.DashboardLive do
 
       <%= if @ancestry_memory_id do %>
         <.ancestry_modal memory_id={@ancestry_memory_id} tenant_id={@tenant_id} ancestry={@ancestry_tree} />
+      <% end %>
+
+      <%= if @publish_confirm_id do %>
+        <.publish_confirm_modal memory_id={@publish_confirm_id} synthesis={@publish_confirm_synthesis} />
       <% end %>
     </div>
     """

@@ -11,7 +11,7 @@ defmodule Librarian.Consolidator do
   memories are flagged as superseded in the WarmStore.
   """
 
-  @similarity_threshold 0.75
+  @similarity_threshold 0.80
 
   @doc ~S"""
   Run a full consolidation pass for a user.
@@ -24,6 +24,9 @@ defmodule Librarian.Consolidator do
   """
   def consolidate(user_id, opts \\ []) when is_binary(user_id) do
     memories = Librarian.WarmStore.all_for_user(user_id)
+    # Hard-lock guard: never consolidate a memory currently delegated /
+    # published through the Council pipeline (mid-flight or immutable).
+    |> Enum.reject(& &1.locked)
 
     if length(memories) < 2 do
       Phoenix.PubSub.broadcast(
@@ -99,8 +102,11 @@ defmodule Librarian.Consolidator do
     table_ref = :ets.new(:pool_swarm, [:public, :set])
 
     # Seed: store {memory.id, {memory, [memory.id]}}
+    # Skip any memory that is hard-locked by the delegation pipeline.
     Enum.each(memories, fn m ->
-      :ets.insert(table_ref, {m.id, {m, [m.id]}})
+      unless m.locked do
+        :ets.insert(table_ref, {m.id, {m, [m.id]}})
+      end
     end)
 
     IO.inspect(:ets.tab2list(table_ref), label: "[Swarm Init] Current ETS Table State")
