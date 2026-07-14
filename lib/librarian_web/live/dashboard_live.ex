@@ -10,6 +10,7 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.InsightsPanel
   import LibrarianWeb.Dashboard.Components.AncestryModal
   alias Librarian.{WarmStore, HotStore, Flusher}
+  require Logger
 
   # ── Swarm / Flood demo texts ─────────────────────────────────────────
   @demo_texts [
@@ -654,6 +655,13 @@ defmodule LibrarianWeb.DashboardLive do
        |> assign(:demo_running, true)
        |> assign(:demo_total, total)}
     end
+  end
+
+  # Catch-all fallback for other events to prevent GenServer crashes (e.g. __noop)
+  @impl true
+  def handle_event(event, params, socket) do
+    Logger.debug("Unhandled event #{inspect(event)} with params #{inspect(params)}")
+    {:noreply, socket}
   end
 
   # ── Helpers ─────────────────────────────────────────────────────────

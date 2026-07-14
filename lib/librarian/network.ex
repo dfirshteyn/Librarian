@@ -40,8 +40,23 @@ defmodule Librarian.Network do
   @spec publish(map(), [float()], String.t() | nil) :: {:ok, String.t()} | {:error, term()}
   def publish(artifact, embedding_vector, publisher_hash \\ nil)
 
-  def publish(%{"summary" => summary} = artifact, embedding_vector, publisher_hash)
-      when is_list(embedding_vector) and length(embedding_vector) == 384 do
+  def publish(artifact, embedding_vector, publisher_hash) do
+    cond do
+      not is_map(artifact) or is_nil(Map.get(artifact, "summary")) or Map.get(artifact, "summary") == "" ->
+        {:error, :invalid_artifact, "Missing required key: summary"}
+
+      not is_list(embedding_vector) ->
+        {:error, :invalid_embedding, "Embedding vector must be a list"}
+
+      length(embedding_vector) != 384 ->
+        {:error, :invalid_embedding, "Embedding vector must be exactly 384 dimensions (got #{length(embedding_vector)})"}
+
+      true ->
+        do_actual_publish(artifact, embedding_vector, publisher_hash)
+    end
+  end
+
+  defp do_actual_publish(%{"summary" => summary} = artifact, embedding_vector, publisher_hash) do
     # 1. Generate deterministic content hash
     hash_id = :crypto.hash(:sha256, summary) |> Base.encode16(case: :lower)
 
@@ -88,10 +103,6 @@ defmodule Librarian.Network do
       _ ->
         {:error, :insert_failed}
     end
-  end
-
-  def publish(_artifact, _embedding_vector, _publisher_hash) do
-    {:error, :invalid_artifact, "Missing required key: summary"}
   end
 
   @doc """
