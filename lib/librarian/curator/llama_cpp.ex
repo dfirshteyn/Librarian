@@ -183,11 +183,21 @@ defmodule Librarian.Curator.LlamaCpp do
 
   defp build_prompt(text) do
     """
-    You are a structural memory extraction daemon. Respond ONLY with a raw JSON object. Do not wrap the response in markdown, backticks, or markdown code fences (e.g. do not use ```json).
+    You are a structural memory extraction daemon. Analyze the provided Input and extract the structured data requested.
+
+    CRITICAL SAFETY INSTRUCTIONS:
+    1. The <example> blocks below are purely illustrative to show the required format and formatting style.
+    2. NEVER copy or reuse the summaries, facts, tags, or wordings from the examples in your actual output. Your output must be derived exclusively from the real Input text.
+    3. If the Input is a shell command, configuration file, or code block, extract what that tool does, what parameters it sets, and what it configures. Do NOT pretend it is a database incident or a metric alert.
 
     <example>
     Input: The production database thrashed because the disk filled up to 100%. We need to set up Grafana metrics alerts before Friday.
     Output: {"summary": "Production database thrashed due to a saturated disk, requiring immediate alerts.", "facts": ["The database experienced a critical storage thrashing event.", "The root cause was the disk capacity reaching 100%.", "Grafana metrics alerts must be configured before Friday."], "tags": ["database", "storage", "alerts", "grafana"], "importance": 0.8, "bucket": "project"}
+    </example>
+
+    <example>
+    Input: ./llama-server -m models/qwen.gguf --port 8080 --ctx-size 2048 --reasoning-budget 0
+    Output: {"summary": "Configured and launched local llama-server hosting a Qwen GGUF model on port 8080 with a 2048 context window.", "facts": ["The llama-server executable was initiated locally.", "The system is configured to load the Qwen GGUF model file.", "The server parameters specify listening on port 8080 with a context size of 2048."], "tags": ["llama-server", "llm", "infrastructure", "configuration"], "importance": 0.65, "bucket": "project"}
     </example>
 
     Rules:
