@@ -348,7 +348,9 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   def handle_event("flush_all", _params, socket) do
-    Flusher.flush_all(socket.assigns.flush_concurrency, force_local: socket.assigns.force_local)
+    Flusher.flush_all(socket.assigns.tenant_id, socket.assigns.flush_concurrency,
+      force_local: socket.assigns.force_local
+    )
     tid = socket.assigns.tenant_id
 
     {:noreply,

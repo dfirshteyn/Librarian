@@ -8,6 +8,24 @@ defmodule Librarian.ParentSummarizerTest do
     on_exit(fn ->
       Librarian.HotStore.drain("local:inbox")
       Librarian.Wal.truncate("local:inbox")
+
+      # Remove the WARM ETS rows this test inserted so they don't leak
+      # into the shared ETS table for other tests.
+      :ets.delete(:warm_memories, 101)
+      :ets.delete(:warm_memories, 102)
+
+      # Remove the COLD relationships written under "local" (chunk_of edges
+      # from ParentSummarizer) so they don't pollute other tests.
+      conn = Librarian.ColdStore.ConnectionManager.get_conn("local")
+
+      Exqlite.query(conn, "DELETE FROM memory_relationships WHERE source_id = '101' OR target_id = '101' OR source_id = '102' OR target_id = '102'", [])
+
+      # Delete the isolated test insights file so mix test never writes
+      # into the dev priv/cold/insights.jsonl.
+      insights_path =
+        Path.join([Application.get_env(:librarian, :cold_dir, "priv/cold"), "insights.jsonl"])
+
+      if File.exists?(insights_path), do: File.rm!(insights_path)
     end)
 
     :ok

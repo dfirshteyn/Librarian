@@ -164,7 +164,7 @@ defmodule LibrarianWeb.ApiController do
 
       results =
         case bucket do
-          "all" -> Librarian.Flusher.flush_all()
+          "all" -> Librarian.Flusher.flush_all(user_id)
           b -> [Librarian.Flusher.flush_bucket(b)]
         end
 

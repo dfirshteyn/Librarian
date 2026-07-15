@@ -44,14 +44,38 @@ defmodule Librarian.Flusher do
                   case Librarian.Curator.embed(result.summary, curator_impl) do
                     {:ok, vec} -> %{result | embedding: vec}
                     {:error, embed_err} ->
-                      Logger.warning("[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)}, storing without embedding")
-                      result
+                      Logger.warning("[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload")
+                      # Put this payload back so a curator/embed failure loses nothing.
+                      # Mirrors the summarize-failure branch: the memory is NOT stored,
+                      # it's excluded from `succeeded`, and the WAL stays intact so it
+                      # retries on the next flush once the embedding server is back.
+                      Librarian.HotStore.put(bucket, payload)
+                      {:error, embed_err}
                   end
 
                 normalized = Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
                 warm_bucket = "#{user_id}:#{normalized}"
                 memory = Librarian.WarmStore.put(warm_bucket, result, correlation_id: payload.parent_id)
                 Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
+
+                # Log ancestry so the HOT→WARM transition is visible in the
+                # ancestry modal. For chunked docs the edge points at the HOT
+                # correlation id (the synthetic parent's origin); for normal
+                # ingests it points at the HOT bucket that was just drained.
+                origin =
+                  if payload.parent_id do
+                    "hot:#{payload.parent_id}"
+                  else
+                    "hot:#{bucket}"
+                  end
+
+                Librarian.ColdStore.log_relationship(
+                  to_string(memory.id),
+                  origin,
+                  "derived_from",
+                  user_id,
+                  %{bucket: bucket, parent_id: payload.parent_id}
+                )
 
                 # Notify ChunkTracker if this was a chunked payload
                 if payload.parent_id do
@@ -85,9 +109,23 @@ defmodule Librarian.Flusher do
     end
   end
 
-  @doc "Flush every bucket that currently has HOT data."
-  def flush_all(max_concurrency \\ 1, opts \\ []) do
-    buckets = Librarian.HotStore.buckets()
+  @doc """
+  Flush every bucket that currently has HOT data.
+
+  `user_filter` scopes the flush to a single tenant:
+    - `nil` (default) → flush ALL users' buckets (admin / global nightly pass)
+    - a binary user_id → flush only buckets matching `"\#{user_id}:"`,
+      so one tenant's "flush all" never drains another tenant's HOT tier.
+
+  `flush_bucket/2` is already tenant-safe (buckets are namespaced
+  `user_id:bucket`); this only adds scoping to the bulk path.
+  """
+  def flush_all(user_filter \\ nil, max_concurrency \\ 1, opts \\ []) do
+    prefix = if is_binary(user_filter), do: "#{user_filter}:", else: nil
+
+    buckets =
+      Librarian.HotStore.buckets()
+      |> then(fn bs -> if prefix, do: Enum.filter(bs, &String.starts_with?(&1, prefix)), else: bs end)
 
     if max_concurrency > 1 do
       buckets

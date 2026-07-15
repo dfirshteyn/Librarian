@@ -81,7 +81,7 @@ defmodule Librarian do
 
   def command("forget " <> rest, user_id), do: do_forget(rest, user_id)
   def command("flush " <> bucket, _user_id), do: Flusher.flush_bucket(String.trim(bucket))
-  def command("flush all", _user_id), do: Flusher.flush_all()
+  def command("flush all", user_id), do: Flusher.flush_all(user_id)
   def command("status", user_id), do: status(user_id)
   def command(query, user_id), do: recall(query, user_id)
   def command(str), do: command(str, @default_user)

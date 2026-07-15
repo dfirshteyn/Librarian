@@ -27,6 +27,24 @@ defmodule Librarian.Curator.LlamaCpp do
 
   @behaviour Librarian.Curator
 
+  @curator_schema %{
+    "name" => "memory_extraction",
+    "schema" => %{
+      "type" => "object",
+      "properties" => %{
+        "summary" => %{"type" => "string"},
+        "facts" => %{"type" => "array", "items" => %{"type" => "string"}},
+        "tags" => %{"type" => "array", "items" => %{"type" => "string"}},
+        "importance" => %{"type" => "number", "minimum" => 0.0, "maximum" => 1.0},
+        "bucket" => %{
+          "type" => "string",
+          "enum" => ["project", "research", "ideas", "thoughts", "finance", "inbox"]
+        }
+      },
+      "required" => ["summary", "facts", "tags", "importance", "bucket"]
+    }
+  }
+
   @impl true
   def summarize(chunk) when is_list(chunk) do
     text =
@@ -38,7 +56,7 @@ defmodule Librarian.Curator.LlamaCpp do
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
     url = get_url(chunk)
 
-    with {:ok, body} <- chat(prompt, url: url, temperature: 0.1),
+    with {:ok, body} <- chat(prompt, url: url, temperature: 0.1, response_format: @curator_schema |> then(&%{"type" => "json_schema", "json_schema" => &1})),
          {:ok, result} <- parse_result(body) do
       bucket = fallback_bucket(result.bucket, text)
       cleaned = %{result | facts: deduplicate_facts(result.facts, result.summary), bucket: bucket}
@@ -106,13 +124,15 @@ defmodule Librarian.Curator.LlamaCpp do
         ]
       end
 
-    body = %{
-      "model" => model_name(),
-      "messages" => messages,
-      "response_format" => %{"type" => "json_object"},
-      "temperature" => temperature,
-      "max_tokens" => 512
-    }
+      response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
+
+      body = %{
+        "model" => model_name(),
+        "messages" => messages,
+        "response_format" => response_format,
+        "temperature" => temperature,
+        "max_tokens" => 512
+      }
 
     case Req.post(req(),
            url: "#{url}/chat/completions",

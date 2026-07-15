@@ -151,14 +151,19 @@ defmodule Librarian.McpServer do
       %{
         "name" => "flush",
         "description" =>
-          "Manually drain HOT buffers to WARM tier through the curator. Converts raw capture text into structured memories (summary, facts, tags, importance score).",
+          "Manually drain HOT buffers to WARM tier through the curator. Converts raw capture text into structured memories (summary, facts, tags, importance score). 'all' flushes only the given user's buckets.",
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
             "bucket" => %{
               "type" => "string",
-              "description" => "Specific bucket to flush, or 'all' for all buckets",
+              "description" => "Specific bucket to flush, or 'all' for all buckets of the given user",
               "default" => "all"
+            },
+            "user_id" => %{
+              "type" => "string",
+              "description" => "User/agent identifier whose HOT tier to flush",
+              "default" => "local"
             }
           }
         }
@@ -310,10 +315,11 @@ defmodule Librarian.McpServer do
 
   defp call_tool("flush", args) do
     bucket = args["bucket"] || "all"
+    user_id = args["user_id"] || "local"
 
     results =
       case bucket do
-        "all" -> Librarian.Flusher.flush_all()
+        "all" -> Librarian.Flusher.flush_all(user_id)
         b -> [Librarian.Flusher.flush_bucket(b)]
       end
 

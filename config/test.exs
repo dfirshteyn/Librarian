@@ -14,6 +14,10 @@ config :librarian, :start_ws_server, false
 
 config :librarian, :db_dir, "tmp/test_data"
 
+# Isolate the COLD insights.jsonl + SQLite dir so mix test never writes
+# into the dev priv/cold file (and never polutes the morning briefing).
+config :librarian, :cold_dir, "tmp/test_cold"
+
 # Use Stub in test to avoid network calls and API keys
 config :librarian, consolidation_curator: Librarian.Curator.Stub
 
