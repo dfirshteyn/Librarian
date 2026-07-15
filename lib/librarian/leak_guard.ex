@@ -2,9 +2,14 @@ defmodule Librarian.LeakGuard do
   @moduledoc """
   Scrubs high-confidence secrets from payload text before it ever crosses
   a network boundary (i.e., before `Curator.QwenApi` or any other remote
-  backend touches it). Local storage (HOT ETS, WARM, COLD JSONL) always
-  gets the original text — redaction only applies to what leaves the
-  machine.
+  backend touches it), AND before it's persisted to the HOT tier WAL.
+
+  The WAL is the event-sourcing / audit-trail layer — scrubbing happens
+  there so the persisted canonical record is clean, while the transient
+  HOT ETS copy stays unscrubbed for in-memory performance. On crash
+  recovery, WAL replay reconstructs ETS from the scrubbed copy, so
+  ancestry and downstream tiers (WARM, COLD, council, public graph)
+  all inherit the clean version.
 
   Deliberately zero-dependency and synchronous — no process overhead for
   something that runs on every outbound payload. The regex list covers
@@ -45,8 +50,9 @@ defmodule Librarian.LeakGuard do
   Returns `{scrubbed_text, redaction_count}`. If `redaction_count` is
   zero, the text was clean and you can skip logging the scrub event.
 
-  Always call this on the text going to a remote curator backend, never
-  on text going to local storage — the local stores get the original.
+  Called internally by `Librarian.Wal.append/2` before writing to disk,
+  and by curator backends before sending to remote APIs. The transient
+  HOT ETS copy intentionally stays unscrubbed for performance.
   """
   def scrub(text) when is_binary(text) do
     Enum.reduce(@patterns, {text, 0}, fn {type, pattern}, {acc_text, count} ->

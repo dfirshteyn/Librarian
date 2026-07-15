@@ -34,14 +34,21 @@ defmodule Librarian.Wal do
 
     seq = next_seq(bucket)
 
+    # Scrub secrets before persistence. HOT ETS keeps the unscrubbed original
+    # for transient in-memory performance; only the persisted WAL copy needs
+    # to be clean, since WAL is replayed on crash recovery and feeds all
+    # downstream tiers (WARM, COLD, ancestry, council, public graph).
+    {scrubbed_text, _redaction_count} = Librarian.LeakGuard.scrub(payload.raw_text)
+    scrubbed_payload = %{payload | raw_text: scrubbed_text}
+
     line =
       Librarian.Json.encode(%{
         "seq" => seq,
-        "captured_at" => DateTime.to_iso8601(payload.occurred_at || DateTime.utc_now()),
-        "source" => payload.source,
-        "raw_text" => payload.raw_text,
-        "hint_tags" => payload.hint_tags,
-        "metadata" => payload.metadata
+        "captured_at" => DateTime.to_iso8601(scrubbed_payload.occurred_at || DateTime.utc_now()),
+        "source" => scrubbed_payload.source,
+        "raw_text" => scrubbed_payload.raw_text,
+        "hint_tags" => scrubbed_payload.hint_tags,
+        "metadata" => scrubbed_payload.metadata
       })
 
     # :append mode + sync write — we want this on disk before we touch ETS
