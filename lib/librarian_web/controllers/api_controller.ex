@@ -196,7 +196,7 @@ defmodule LibrarianWeb.ApiController do
         conn
         |> put_resp_content_type("application/json")
         |> put_resp_header("content-disposition", "attachment; filename=\"#{user_id}_memories.json\"")
-        |> send_resp(200, Jason.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
+        |> send_resp(200, Librarian.Json.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
       else
         conn
         |> put_status(404)
@@ -228,8 +228,8 @@ defmodule LibrarianWeb.ApiController do
             id: id,
             bucket: bucket,
             summary: summary,
-            facts: facts |> Jason.decode() |> case do {:ok, v} -> v; _ -> [] end,
-            tags: tags |> Jason.decode() |> case do {:ok, v} -> v; _ -> [] end,
+            facts: facts |> Librarian.Json.decode() |> case do {:ok, v} -> v; _ -> [] end,
+            tags: tags |> Librarian.Json.decode() |> case do {:ok, v} -> v; _ -> [] end,
             importance: importance,
             created_at: created_at,
             last_accessed_at: last_accessed_at

@@ -67,7 +67,7 @@ defmodule Librarian.ColdStore do
              is_binary(user_id) do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
 
-    metadata_json = Jason.encode!(metadata)
+    metadata_json = Librarian.Json.encode!(metadata)
 
     {:ok, _} =
       Exqlite.query(
@@ -168,7 +168,7 @@ defmodule Librarian.ColdStore do
   defp decode_json_map(nil), do: %{}
 
   defp decode_json_map(json) when is_binary(json) do
-    case Jason.decode(json) do
+    case Librarian.Json.decode(json) do
       {:ok, map} when is_map(map) -> map
       _ -> %{}
     end
@@ -424,8 +424,8 @@ defmodule Librarian.ColdStore do
   def archive(%Librarian.WarmStore.Memory{} = memory, user_id) when is_binary(user_id) do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
 
-    facts_json = Jason.encode!(memory.facts || [])
-    tags_json = Jason.encode!(memory.tags || [])
+    facts_json = Librarian.Json.encode!(memory.facts || [])
+    tags_json = Librarian.Json.encode!(memory.tags || [])
     embedding_blob = pack_embedding(memory.embedding)
 
     now = DateTime.to_iso8601(DateTime.utc_now())
@@ -781,7 +781,7 @@ defmodule Librarian.ColdStore do
   defp decode_json_list(nil), do: []
 
   defp decode_json_list(json) when is_binary(json) do
-    case Jason.decode(json) do
+    case Librarian.Json.decode(json) do
       {:ok, list} when is_list(list) -> list
       _ -> []
     end

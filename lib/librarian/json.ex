@@ -19,6 +19,11 @@ defmodule Librarian.Json do
     :glazer_json.encode(value, @opts)
   end
 
+  @doc "Encode an Elixir term to a JSON binary. Bang variant; raises on failure (alias of `encode/1`)."
+  def encode!(value) do
+    :glazer_json.encode(value, @opts)
+  end
+
   @doc "Decode a JSON binary. Returns {:ok, term} or {:error, reason}."
   def decode(binary) when is_binary(binary) do
     :glazer_json.try_decode(binary, @opts)

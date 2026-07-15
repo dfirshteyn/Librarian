@@ -86,7 +86,7 @@ defmodule Librarian.Network do
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (id) DO NOTHING
         """,
-        [hash_id, summary, importance, bucket, Jason.encode!(metadata), embedding_vector, publisher_hash]
+        [hash_id, summary, importance, bucket, Librarian.Json.encode!(metadata), embedding_vector, publisher_hash]
       )
 
     case result do
@@ -273,7 +273,7 @@ defmodule Librarian.Network do
 
   defp decode_json(nil, default), do: default
   defp decode_json(json, default) when is_binary(json) do
-    case Jason.decode(json) do
+    case Librarian.Json.decode(json) do
       {:ok, map} when is_map(map) -> map
       _ -> default
     end
