@@ -427,13 +427,14 @@ defmodule LibrarianWeb.ApiController do
 
   Publish a Council deliberation result to the public graph.
   Body: {"summary": "...", "importance": 0.8, "bucket": "research",
-         "facts": [...], "tags": [...], "embedding": [384 floats...]}
+         "facts": [...], "tags": [...], "embedding": [1024 floats...]}
 
   Requires a valid embedding vector. The publisher's anonymous X-User-Id
   hash is recorded if available.
   """
   def publish_to_network(conn, params) do
     user_id = get_user_id(conn)
+    expected_dims = Application.get_env(:librarian, :embedding_dimensions, 1024)
 
     with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
       embedding = params["embedding"]
@@ -442,12 +443,12 @@ defmodule LibrarianWeb.ApiController do
         is_nil(embedding) or not is_list(embedding) ->
           conn
           |> put_status(422)
-          |> json(%{ok: false, error: "missing or invalid embedding (requires list of 384 floats)"})
+          |> json(%{ok: false, error: "missing or invalid embedding (requires list of #{expected_dims} floats)"})
 
-        length(embedding) != 384 ->
+        length(embedding) != expected_dims ->
           conn
           |> put_status(422)
-          |> json(%{ok: false, error: "embedding must be exactly 384 floats"})
+          |> json(%{ok: false, error: "embedding must be exactly #{expected_dims} floats"})
 
         is_nil(params["summary"]) ->
           conn

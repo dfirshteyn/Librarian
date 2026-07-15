@@ -3,8 +3,8 @@ defmodule Librarian.Network do
   Manages the border crossing from private sandboxed text into the public,
   immutable Postgres graph substrate (the "MemWay Superhighway").
 
-  Uses Postgres via `Librarian.PublicRepo` with pgvector for 384-dim
-  cosine similarity search (BGE-small embeddings). No HNSW index is
+  Uses Postgres via `Librarian.PublicRepo` with pgvector for 1024-dim
+  cosine similarity search (BGE-M3 embeddings). No HNSW index is
   needed at hackathon scale — exact k-NN via `ORDER BY embedding <=> ?`
   is sub-millisecond for < 10k nodes.
 
@@ -34,13 +34,15 @@ defmodule Librarian.Network do
       - `"importance"` (required) — 0.0-1.0
       - `"bucket"` (required) — e.g. "research", "ideas"
       - `"metadata"` (optional map) — tags, facts, persona_perspectives
-    - `embedding_vector`: a list of 384 floats from BGE-small
+    - `embedding_vector`: a list of 1024 floats from BGE-M3 (configurable via `:embedding_dimensions`)
     - `publisher_hash`: anonymous X-User-Id hash (optional)
   """
   @spec publish(map(), [float()], String.t() | nil) :: {:ok, String.t()} | {:error, term()}
   def publish(artifact, embedding_vector, publisher_hash \\ nil)
 
   def publish(artifact, embedding_vector, publisher_hash) do
+    expected_dims = Application.get_env(:librarian, :embedding_dimensions, 1024)
+
     cond do
       not is_map(artifact) or is_nil(Map.get(artifact, "summary")) or Map.get(artifact, "summary") == "" ->
         {:error, :invalid_artifact, "Missing required key: summary"}
@@ -48,8 +50,8 @@ defmodule Librarian.Network do
       not is_list(embedding_vector) ->
         {:error, :invalid_embedding, "Embedding vector must be a list"}
 
-      length(embedding_vector) != 384 ->
-        {:error, :invalid_embedding, "Embedding vector must be exactly 384 dimensions (got #{length(embedding_vector)})"}
+      length(embedding_vector) != expected_dims ->
+        {:error, :invalid_embedding, "Embedding vector must be exactly #{expected_dims} dimensions (got #{length(embedding_vector)})"}
 
       true ->
         do_actual_publish(artifact, embedding_vector, publisher_hash)

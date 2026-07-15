@@ -46,10 +46,10 @@ services:
       timeout: 5s
       retries: 3
 
-  # llama.cpp server running Qwen 0.6B Q4_K_M + BGE-small embedding model
+  # llama.cpp server running Qwen 0.6B Q4_K_M + BGE-M3 embedding model
   # The models directory should contain:
   #   - qwen2.5-0.5b-q4_k_m.gguf  (completion, port 1234)
-  #   - bge-small-en-v1.5-q8_0.gguf (embedding, port 1235)
+  #   - bge-m3-q8.gguf (embedding, port 1235) - user-provided GGUF model
   # Downloads are automatic on first run via the init script below.
   llama-cpp:
     image: ghcr.io/ggerganov/llama.cpp:server
