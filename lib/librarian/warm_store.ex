@@ -78,10 +78,8 @@ defmodule Librarian.WarmStore do
   Return all active (non-superseded) memories for a given user.
   """
   def all_for_user(user_id) do
-    prefix = user_id <> ":"
-
     all()
-    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+    |> Enum.filter(&(Librarian.Bucket.user_of(&1.bucket) == user_id))
     |> Enum.reject(& &1.superseded_by)
   end
 
@@ -91,10 +89,8 @@ defmodule Librarian.WarmStore do
   the consolidation history is visible without cluttering the active list.
   """
   def superseded_count_for_user(user_id) do
-    prefix = user_id <> ":"
-
     all()
-    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+    |> Enum.filter(&(Librarian.Bucket.user_of(&1.bucket) == user_id))
     |> Enum.count(& &1.superseded_by)
   end
 
@@ -114,10 +110,9 @@ defmodule Librarian.WarmStore do
     exclude_id = Keyword.get(opts, :exclude_id)
     bucket_filter = Keyword.get(opts, :other_bucket_only)
     user_id = Keyword.get(opts, :user_id, "local")
-    prefix = user_id <> ":"
 
     all()
-    |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+    |> Enum.filter(&(Librarian.Bucket.user_of(&1.bucket) == user_id))
     |> Enum.filter(fn m -> is_nil(exclude_id) or m.id != exclude_id end)
     |> Enum.filter(fn m -> is_nil(bucket_filter) or m.bucket != bucket_filter end)
     |> Enum.filter(fn m ->
@@ -147,7 +142,6 @@ defmodule Librarian.WarmStore do
   def recall(query, user_id \\ "local", opts \\ []) when is_binary(query) do
     query_tokens = String.downcase(query) |> String.split() |> Enum.reject(&(&1 == ""))
     include_superseded = Keyword.get(opts, :include_superseded, false)
-    prefix = user_id <> ":"
 
     curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
 
@@ -160,7 +154,7 @@ defmodule Librarian.WarmStore do
     # 1. Gather all viable memory candidates (no hard keyword filter)
     candidates =
       all()
-      |> Enum.filter(&String.starts_with?(&1.bucket, prefix))
+      |> Enum.filter(&(Librarian.Bucket.user_of(&1.bucket) == user_id))
       |> Enum.filter(fn m -> include_superseded or is_nil(m.superseded_by) end)
 
     # 2. Extract the three baseline metrics for each candidate
