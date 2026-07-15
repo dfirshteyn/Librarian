@@ -124,23 +124,24 @@ defmodule LibrarianWeb.DashboardLive do
     "tried the new ramen place downtown, the tonkotsu broth was outstanding"
   ]
 
-  defp generate_tenant_id do
-    "anon_hack_" <> Base.url_encode64(:crypto.strong_rand_bytes(6), padding: false)
-  end
-
   @impl true
-  def mount(params, _session, socket) do
-    # Allow a tenant id from the URL (?tid=judge_devpost_2026 opens the
-    # premium cloud tier; ?tid=anon_xyz stays on the free local model).
-    # Judges get an "if you know, you know" VIP experience with zero signup.
+  def mount(_params, session, socket) do
+    # Identity comes from the signed, server-verified claim persisted in the
+    # session by Librarian.Auth.Plug — never from a client-supplied URL param.
+    # A forged or hand-edited ?tid= simply fails verification and falls back to
+    # a fresh anonymous sandbox, so tier escalation is impossible.
     tenant_id =
-      case params do
-        %{"tid" => tid} when is_binary(tid) and byte_size(tid) > 0 -> tid
-        _ -> generate_tenant_id()
+      case session do
+        %{"sandbox_id" => sid} when is_binary(sid) and byte_size(sid) > 0 ->
+          sid
+
+        _ ->
+          # Fallback (e.g. unit tests) — never happens in the browser pipeline.
+          Librarian.Auth.generate_anon_id()
       end
 
-    # Compute the active tier for display (judge_ prefix => premium cloud).
-    tier = if Librarian.Curator.judge?(tenant_id), do: :judge, else: :free
+    # Tier is part of the signed claim, so it is authentic.
+    tier = Map.get(session, "tier", :anon)
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "ingest")

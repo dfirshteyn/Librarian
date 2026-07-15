@@ -2,7 +2,7 @@ defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
   use Phoenix.Component
 
   attr :tenant_id, :string, required: true
-  attr :tier, :atom, default: :free
+  attr :tier, :atom, default: :anon
   attr :force_local, :boolean, default: false
 
   def tenant_banner(assigns) do
@@ -25,7 +25,7 @@ defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
             </div>
             <p class="text-xs text-gray-400 mt-1">
               <%= if @tier == :judge do %>
-                Premium cloud tier — re-curation routed to Alibaba Cloud Qwen. Use <code>?tid=judge_devpost_2026</code> on the URL.
+                Premium cloud tier — re-curation routed to Alibaba Cloud Qwen. Granted by a server-signed link (not self-serviceable).
               <% else %>
                 Free tier — runs fully local on the 1.7B model. Sandboxed in a local SQLite WAL file.
               <% end %>
