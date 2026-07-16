@@ -12,6 +12,7 @@ defmodule Librarian.ColdStore do
   """
 
   @insights_dir Application.compile_env(:librarian, :cold_dir, "priv/cold")
+  require Logger
 
   # ── insights.jsonl (unchanged) ──────────────────────────────────────
 
@@ -84,29 +85,41 @@ defmodule Librarian.ColdStore do
   Returns map with :outgoing (source) and :incoming (target) relationships.
   """
   def get_memory_lineage(memory_id, user_id) do
-    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+    try do
+      conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
 
-    outgoing =
-      case Exqlite.query(
-             conn,
-             "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC",
-             [memory_id]
-           ) do
-        {:ok, %{rows: rows}} -> rows_to_relationships(rows)
-        _ -> []
+      # Handle nil connection gracefully (connection failed)
+      if is_nil(conn) do
+        {:ok, %{outgoing: [], incoming: []}}
+      else
+
+        outgoing =
+          case Exqlite.query(
+                conn,
+                "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC",
+                [memory_id]
+              ) do
+            {:ok, %{rows: rows}} -> rows_to_relationships(rows)
+            _ -> []
+          end
+
+        incoming =
+          case Exqlite.query(
+                conn,
+                "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC",
+                [memory_id]
+              ) do
+            {:ok, %{rows: rows}} -> rows_to_relationships(rows)
+            _ -> []
+          end
+
+        %{outgoing: outgoing, incoming: incoming}
       end
-
-    incoming =
-      case Exqlite.query(
-             conn,
-             "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC",
-             [memory_id]
-           ) do
-        {:ok, %{rows: rows}} -> rows_to_relationships(rows)
-        _ -> []
-      end
-
-    %{outgoing: outgoing, incoming: incoming}
+    rescue
+      e ->
+        Logger.warning("Lineage lookup failed for memory #{memory_id}: #{inspect(e)}")
+        {:ok, %{outgoing: [], incoming: []}}
+    end
   end
 
   @doc """

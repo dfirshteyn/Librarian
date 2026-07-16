@@ -12,6 +12,7 @@ defmodule Librarian.ColdStore.ConnectionManager do
   """
 
   @table :cold_conns
+  require Logger
 
   @schema_statements [
     """
@@ -208,13 +209,17 @@ defmodule Librarian.ColdStore.ConnectionManager do
         pid
 
       {:error, reason} ->
-        raise "Failed to start SQLite connection for user #{user_id}: #{inspect(reason)}"
+        Logger.warning("Failed to start SQLite connection for user #{user_id}: #{inspect(reason)}")
+        nil
     end
   end
 
   defp init_schema(conn) do
     Enum.each(@schema_statements, fn stmt ->
-      {:ok, _} = Exqlite.query(conn, stmt, [])
+      case Exqlite.query(conn, stmt, []) do
+        {:ok, _} -> :ok
+        {:error, err} -> Logger.warning("Schema init error: #{inspect(err)}")
+      end
     end)
 
     # Only create vec0 virtual table if sqlite-vec is enabled
