@@ -1,9 +1,9 @@
 defmodule LibrarianWeb.Dashboard.Components.TenantBanner do
   use Phoenix.Component
 
-  attr :tenant_id, :string, required: true
-  attr :tier, :atom, default: :anon
-  attr :force_local, :boolean, default: false
+  attr(:tenant_id, :string, required: true)
+  attr(:tier, :atom, default: :anon)
+  attr(:force_local, :boolean, default: false)
 
   def tenant_banner(assigns) do
     ~H"""

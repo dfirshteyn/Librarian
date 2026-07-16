@@ -224,7 +224,10 @@ defmodule Librarian.Delegation do
                   {:error, type, reason} -> {type, reason}
                 end
 
-              Logger.warning("[Delegation] Network publish failed for ##{memory_id}: #{inspect(reason)}")
+              Logger.warning(
+                "[Delegation] Network publish failed for ##{memory_id}: #{inspect(reason)}"
+              )
+
               Librarian.WarmStore.update(memory_id, %{locked: false})
               broadcast(user_id, {:publish_progress, memory_id, :error, 0})
               {:error, reason}

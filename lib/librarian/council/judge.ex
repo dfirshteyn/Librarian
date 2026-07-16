@@ -67,7 +67,7 @@ defmodule Librarian.Council.Judge do
     # Use QwenApi with moderate temperature for synthesis
     {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
 
-    case Librarian.Curator.QwenApi.chat(scrubbed_prompt, [temperature: 0.5]) do
+    case Librarian.Curator.QwenApi.chat(scrubbed_prompt, temperature: 0.5) do
       {:ok, body} ->
         parse_synthesis(body)
 
@@ -80,15 +80,15 @@ defmodule Librarian.Council.Judge do
     with content when is_binary(content) <-
            get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-       {:ok,
-        %{
-          summary: map["summary"] || "",
-          facts: map["facts"] || [],
-          tags: map["tags"] || [],
-          importance: to_float(map["importance"]),
-          bucket: Librarian.Router.normalize_bucket(map["bucket"]),
-          persona_perspectives: map["persona_perspectives"] || %{}
-        }}
+      {:ok,
+       %{
+         summary: map["summary"] || "",
+         facts: map["facts"] || [],
+         tags: map["tags"] || [],
+         importance: to_float(map["importance"]),
+         bucket: Librarian.Router.normalize_bucket(map["bucket"]),
+         persona_perspectives: map["persona_perspectives"] || %{}
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

@@ -44,14 +44,16 @@ defmodule Librarian.Network do
     expected_dims = Application.get_env(:librarian, :embedding_dimensions, 1024)
 
     cond do
-      not is_map(artifact) or is_nil(Map.get(artifact, "summary")) or Map.get(artifact, "summary") == "" ->
+      not is_map(artifact) or is_nil(Map.get(artifact, "summary")) or
+          Map.get(artifact, "summary") == "" ->
         {:error, :invalid_artifact, "Missing required key: summary"}
 
       not is_list(embedding_vector) ->
         {:error, :invalid_embedding, "Embedding vector must be a list"}
 
       length(embedding_vector) != expected_dims ->
-        {:error, :invalid_embedding, "Embedding vector must be exactly #{expected_dims} dimensions (got #{length(embedding_vector)})"}
+        {:error, :invalid_embedding,
+         "Embedding vector must be exactly #{expected_dims} dimensions (got #{length(embedding_vector)})"}
 
       true ->
         do_actual_publish(artifact, embedding_vector, publisher_hash)
@@ -86,7 +88,15 @@ defmodule Librarian.Network do
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (id) DO NOTHING
         """,
-        [hash_id, summary, importance, bucket, Librarian.Json.encode!(metadata), embedding_vector, publisher_hash]
+        [
+          hash_id,
+          summary,
+          importance,
+          bucket,
+          Librarian.Json.encode!(metadata),
+          embedding_vector,
+          publisher_hash
+        ]
       )
 
     case result do
@@ -173,7 +183,17 @@ defmodule Librarian.Network do
     case results do
       %{rows: rows} when is_list(rows) ->
         Enum.map(rows, fn row ->
-          [id, summary, importance, bucket, metadata_json, publisher_hash, oss_url, distance, inserted_at] = row
+          [
+            id,
+            summary,
+            importance,
+            bucket,
+            metadata_json,
+            publisher_hash,
+            oss_url,
+            distance,
+            inserted_at
+          ] = row
 
           %{
             id: id,
@@ -216,7 +236,15 @@ defmodule Librarian.Network do
     nodes =
       case nodes_result do
         %{rows: rows} when is_list(rows) ->
-          Enum.map(rows, fn [id, summary, importance, bucket, metadata_json, publisher_hash, inserted_at] ->
+          Enum.map(rows, fn [
+                              id,
+                              summary,
+                              importance,
+                              bucket,
+                              metadata_json,
+                              publisher_hash,
+                              inserted_at
+                            ] ->
             %{
               id: id,
               summary: summary,
@@ -272,6 +300,7 @@ defmodule Librarian.Network do
   end
 
   defp decode_json(nil, default), do: default
+
   defp decode_json(json, default) when is_binary(json) do
     case Librarian.Json.decode(json) do
       {:ok, map} when is_map(map) -> map

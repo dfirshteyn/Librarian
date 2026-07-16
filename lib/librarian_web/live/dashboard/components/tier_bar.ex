@@ -3,10 +3,10 @@ defmodule LibrarianWeb.Dashboard.Components.TierBar do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :hot_counts, :map, required: true
-  attr :memories, :list, required: true
-  attr :tenant_id, :string, required: true
-  attr :superseded_count, :integer, default: 0
+  attr(:hot_counts, :map, required: true)
+  attr(:memories, :list, required: true)
+  attr(:tenant_id, :string, required: true)
+  attr(:superseded_count, :integer, default: 0)
 
   def tier_bar(assigns) do
     ~H"""

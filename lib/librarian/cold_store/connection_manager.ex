@@ -25,7 +25,8 @@ defmodule Librarian.ColdStore.ConnectionManager do
       embedding BLOB,
       created_at TEXT,
       last_accessed_at TEXT,
-      superseded_by INTEGER REFERENCES memories(id)
+      superseded_by INTEGER REFERENCES memories(id),
+      original_content TEXT
     )
     """,
     """
@@ -90,6 +91,7 @@ defmodule Librarian.ColdStore.ConnectionManager do
       :undefined ->
         :ets.new(@table, [:set, :named_table, :public])
         :ok
+
       _ ->
         :ok
     end
@@ -145,6 +147,7 @@ defmodule Librarian.ColdStore.ConnectionManager do
 
         # Delete the .db file from disk
         path = db_path(user_id)
+
         if File.exists?(path) do
           File.rm!(path)
         end
@@ -154,6 +157,7 @@ defmodule Librarian.ColdStore.ConnectionManager do
       _ ->
         # No active connection — skip. Still try to delete the file though.
         path = db_path(user_id)
+
         if File.exists?(path) do
           File.rm!(path)
         end
@@ -220,6 +224,7 @@ defmodule Librarian.ColdStore.ConnectionManager do
         embedding float[768] distance_metric=cosine
       )
       """
+
       {:ok, _} = Exqlite.query(conn, vec_stmt, [])
 
       vec_trigger = """
@@ -230,10 +235,10 @@ defmodule Librarian.ColdStore.ConnectionManager do
         VALUES (new.id, new.embedding);
       END
       """
+
       {:ok, _} = Exqlite.query(conn, vec_trigger, [])
     end
 
     :ok
   end
-
 end

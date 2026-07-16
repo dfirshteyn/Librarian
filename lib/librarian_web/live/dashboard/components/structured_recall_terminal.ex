@@ -3,8 +3,8 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :tenant_id, :string, required: true
-  attr :structured_response, :any, required: true
+  attr(:tenant_id, :string, required: true)
+  attr(:structured_response, :any, required: true)
 
   def structured_recall_terminal(assigns) do
     ~H"""
@@ -18,7 +18,7 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
         <div class="flex gap-2">
           <span class="text-green-400 text-sm font-bold">$></span>
           <input type="text" name="command"
-            placeholder="/model database performance | /recall deploy | /status"
+            placeholder="/model db perf | /trace deploy | /ancestry 12 | /status"
             class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
           <button type="submit"
             class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
@@ -50,8 +50,8 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
 
   # ── Structured Response Display ─────────────────────────────────────
 
-  attr :response, :map, required: true
-  attr :tenant_id, :string, required: true
+  attr(:response, :map, required: true)
+  attr(:tenant_id, :string, required: true)
 
   def structured_response(assigns) do
     ~H"""
@@ -123,6 +123,67 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
             </div>
           <% end %>
           <p class="text-gray-300 mt-2">WARM total: <%= @response.data.warm_count %></p>
+        </div>
+
+      <% "ancestry_recall" -> %>
+        <div>
+          <p class="text-emerald-400 mb-2">
+            <span class="text-emerald-600">ANCESTRY:</span>
+            memory #<%= @response.memory_id %> (depth <%= @response.depth %>)
+          </p>
+          <%= if @response.tree == [] do %>
+            <p class="text-gray-500">No ancestry relationships found for this memory.</p>
+          <% else %>
+            <%= for edge <- @response.tree do %>
+              <div class="bg-gray-900 rounded p-2 mb-2 border-l-2 border-emerald-600">
+                <p class="text-gray-400 text-[11px] mb-1">
+                  <span class="text-emerald-500">Depth <%= edge.depth %></span> ·
+                  <span class="text-violet-400"><%= edge.type %></span>
+                </p>
+                <p class="text-gray-300"><%= inspect(edge.source && Map.get(edge.source, :summary)) %></p>
+                <p class="text-gray-500 text-[11px] mt-1">↓ #<%= edge.source_id %> → #<%= edge.target_id %></p>
+                <p class="text-gray-500 text-[11px]"><%= inspect(edge.target && Map.get(edge.target, :summary)) %></p>
+                <%= if edge.source && Map.get(edge.source, :has_raw_original) do %>
+                  <span class="text-emerald-700 text-[10px]">🔗 raw original linked</span>
+                <% end %>
+              </div>
+            <% end %>
+          <% end %>
+        </div>
+
+      <% "trace_recall" -> %>
+        <div>
+          <p class="text-violet-400 mb-2">
+            <span class="text-violet-600">TRACE:</span>
+            <%= @response.count %> progressive matches for "<%= @response.query %>"
+          </p>
+          <%= for card <- @response.results do %>
+            <div class="bg-gray-900 rounded p-2 mb-3 border-l-2 border-violet-600">
+              <p class="text-gray-200 font-bold">#<%= card.summary_card.id %> · <%= card.summary_card.bucket %></p>
+              <p class="text-gray-300"><%= card.summary_card.summary %></p>
+
+              <%= if card.raw_original do %>
+                <details class="mt-1">
+                  <summary class="text-emerald-500 text-[11px] cursor-pointer">View raw original</summary>
+                  <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(card.raw_original, 0, 600) %></pre>
+                </details>
+              <% end %>
+
+              <%= if card.children != [] do %>
+                <p class="text-cyan-400 text-[11px] mt-1">↳ <%= length(card.children) %> chunk(s):</p>
+                <%= for c <- card.children do %>
+                  <p class="text-gray-500 text-[10px] ml-3">#<%= c.id %> <%= String.slice(c.summary || "", 0, 80) %></p>
+                <% end %>
+              <% end %>
+
+              <%= if card.cross_links != [] do %>
+                <p class="text-amber-400 text-[11px] mt-1">⇄ cross-links:</p>
+                <%= for x <- card.cross_links do %>
+                  <p class="text-gray-500 text-[10px] ml-3">#<%= x.id %> <%= x.note || "" %></p>
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
         </div>
 
       <% "error" -> %>

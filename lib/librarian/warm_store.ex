@@ -15,6 +15,10 @@ defmodule Librarian.WarmStore.Memory do
     :correlation_id,
     :council,
     :publish_hash,
+    # Linked raw original text (the pre-curation capture / chunk source).
+    # Stored so progressive disclosure can pull the unedited source instantly
+    # once the curated summary is vector-matched — without embedding it.
+    :raw_original,
     published: false,
     locked: false,
     access_count: 0
@@ -60,7 +64,8 @@ defmodule Librarian.WarmStore do
 
   def put(bucket, %Librarian.Curator.Result{} = result, opts \\ []) do
     correlation_id = Keyword.get(opts, :correlation_id)
-    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id})
+    raw_original = Keyword.get(opts, :raw_original)
+    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id, raw_original})
   end
 
   def get(id) do
@@ -85,7 +90,7 @@ defmodule Librarian.WarmStore do
 
   @doc """
   Count how many memories for a user have been superseded (merged into a
-  newer consolidated memory). Used by the dashboard to show \"N merged\" so
+  newer consolidated memory). Used by the dashboard to show "N merged" so
   the consolidation history is visible without cluttering the active list.
   """
   def superseded_count_for_user(user_id) do
@@ -332,7 +337,8 @@ defmodule Librarian.WarmStore do
           publish_hash: m.publish_hash,
           published: m.published,
           locked: m.locked,
-          access_count: m.access_count
+          access_count: m.access_count,
+          raw_original: m.raw_original
         }) <> "\n"
       end)
       |> IO.iodata_to_binary()
@@ -370,14 +376,15 @@ defmodule Librarian.WarmStore do
               importance: map["importance"] || 0.5,
               created_at: created,
               last_accessed_at: accessed,
-               superseded_by: map["superseded_by"],
-               correlation_id: map["correlation_id"],
-               council: map["council"],
-               publish_hash: map["publish_hash"],
-               published: map["published"] || false,
-               locked: map["locked"] || false,
-               access_count: map["access_count"] || 0
-             }
+              superseded_by: map["superseded_by"],
+              correlation_id: map["correlation_id"],
+              council: map["council"],
+              publish_hash: map["publish_hash"],
+              published: map["published"] || false,
+              locked: map["locked"] || false,
+              access_count: map["access_count"] || 0,
+              raw_original: map["raw_original"]
+            }
 
             GenServer.call(__MODULE__, {:load, memory})
 
@@ -428,7 +435,11 @@ defmodule Librarian.WarmStore do
   end
 
   @impl true
-  def handle_call({:put, bucket, result, correlation_id}, _from, %{table: table, next_id: id} = state) do
+  def handle_call(
+        {:put, bucket, result, correlation_id, raw_original},
+        _from,
+        %{table: table, next_id: id} = state
+      ) do
     now = DateTime.utc_now()
 
     memory = %Librarian.WarmStore.Memory{
@@ -440,6 +451,7 @@ defmodule Librarian.WarmStore do
       embedding: result.embedding,
       importance: result.importance,
       correlation_id: correlation_id,
+      raw_original: raw_original,
       created_at: now,
       last_accessed_at: now
     }

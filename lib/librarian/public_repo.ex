@@ -1,7 +1,8 @@
 # Define a custom Postgrex type module that includes the pgvector extension.
 # This is required because Postgrex doesn't know about the `vector` type by default.
 # Must be at the top level — Postgrex.Types.define/3 is a macro that calls Module.create.
-Postgrex.Types.define(Librarian.PublicRepo.PostgrexTypes,
+Postgrex.Types.define(
+  Librarian.PublicRepo.PostgrexTypes,
   [Pgvector.Extensions.Vector] ++ Ecto.Adapters.Postgres.extensions(),
   library: Pgvector
 )

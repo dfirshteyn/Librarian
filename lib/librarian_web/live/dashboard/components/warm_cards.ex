@@ -3,12 +3,12 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :tenant_id, :string, required: true
-  attr :memories, :list, required: true
-  attr :expanded_memories, :any, required: true
-  attr :council_pending, :any, required: true
-  attr :publish_pending, :any, required: true
-  attr :delegation_progress, :any, required: true
+  attr(:tenant_id, :string, required: true)
+  attr(:memories, :list, required: true)
+  attr(:expanded_memories, :any, required: true)
+  attr(:council_pending, :any, required: true)
+  attr(:publish_pending, :any, required: true)
+  attr(:delegation_progress, :any, required: true)
 
   def warm_cards(assigns) do
     ~H"""
@@ -36,12 +36,12 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   # ── Single WARM card (with delegate/publish + progress) ─────────
 
-  attr :memory, :map, required: true
-  attr :expanded?, :boolean, required: true
-  attr :delegate_pending?, :boolean, required: true
-  attr :publish_pending?, :boolean, required: true
-  attr :progress, :any, required: false
-  attr :tenant_id, :string, required: true
+  attr(:memory, :map, required: true)
+  attr(:expanded?, :boolean, required: true)
+  attr(:delegate_pending?, :boolean, required: true)
+  attr(:publish_pending?, :boolean, required: true)
+  attr(:progress, :any, required: false)
+  attr(:tenant_id, :string, required: true)
 
   def warm_card(assigns) do
     memory = assigns.memory
@@ -51,7 +51,8 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       |> assign(:submitted?, not is_nil(memory.council))
       |> assign(:published?, memory.published)
       |> assign(:locked?, memory.locked)
-      |> assign(:border_class,
+      |> assign(
+        :border_class,
         cond do
           memory.published -> "border-emerald-500"
           not is_nil(memory.council) -> "border-violet-500"
@@ -115,14 +116,15 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   # ── Live progress bar (council / publish in flight) ────────────
 
-  attr :progress, :any, required: false
-  attr :kind, :string, required: true
+  attr(:progress, :any, required: false)
+  attr(:kind, :string, required: true)
 
   def progress_bar(assigns) do
     assigns =
       assign(assigns,
         pct: if(is_map(assigns.progress), do: assigns.progress.pct, else: 10),
-        label: if(assigns.kind == "publish", do: "🌐 Publishing…", else: "⚖️ Delegating to Council…")
+        label:
+          if(assigns.kind == "publish", do: "🌐 Publishing…", else: "⚖️ Delegating to Council…")
       )
 
     ~H"""
@@ -141,7 +143,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   # ── Council synthesis detail (after delegate) ─────────────────────
 
-  attr :memory, :map, required: true
+  attr(:memory, :map, required: true)
 
   def council_detail(assigns) do
     council = assigns.memory.council || %{}
@@ -189,7 +191,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   # ── Memory Detail (expanded card) ───────────────────────────────────
 
-  attr :memory, :map, required: true
+  attr(:memory, :map, required: true)
 
   def memory_detail(assigns) do
     ~H"""
@@ -249,11 +251,13 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   # ── Lineage Detail (audit trail) ───────────────────────────────────────
 
-  attr :memory, :map, required: true
-  attr :tenant_id, :string, required: true
+  attr(:memory, :map, required: true)
+  attr(:tenant_id, :string, required: true)
 
   def lineage_detail(assigns) do
-    lineage = Librarian.ColdStore.get_memory_lineage(to_string(assigns.memory.id), assigns.tenant_id)
+    lineage =
+      Librarian.ColdStore.get_memory_lineage(to_string(assigns.memory.id), assigns.tenant_id)
+
     assigns = assign(assigns, :lineage, lineage)
 
     ~H"""

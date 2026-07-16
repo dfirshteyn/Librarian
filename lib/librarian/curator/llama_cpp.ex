@@ -56,7 +56,13 @@ defmodule Librarian.Curator.LlamaCpp do
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
     url = get_url(chunk)
 
-    with {:ok, body} <- chat(prompt, url: url, temperature: 0.1, response_format: @curator_schema |> then(&%{"type" => "json_schema", "json_schema" => &1})),
+    with {:ok, body} <-
+           chat(prompt,
+             url: url,
+             temperature: 0.1,
+             response_format:
+               @curator_schema |> then(&%{"type" => "json_schema", "json_schema" => &1})
+           ),
          {:ok, result} <- parse_result(body) do
       bucket = fallback_bucket(result.bucket, text)
       cleaned = %{result | facts: deduplicate_facts(result.facts, result.summary), bucket: bucket}
@@ -67,6 +73,58 @@ defmodule Librarian.Curator.LlamaCpp do
   @impl true
   def embed(text) when is_binary(text) do
     embed(text, [])
+  end
+
+  @doc """
+  Describe an image using a vision-capable llama.cpp model.
+  The image_data can be raw binary or base64-encoded.
+  """
+  @impl true
+  def describe_image(image_data, opts \\ []) when is_binary(image_data) do
+    url = Keyword.get(opts, :url, base_url())
+
+    # Encode as base64 for the API
+    b64 = Base.encode64(image_data)
+
+    body = %{
+      "model" => Application.get_env(:librarian, :vision_model) || model_name(),
+      "messages" => [
+        %{
+          "role" => "user",
+          "content" => [
+            %{
+              "type" => "text",
+              "text" => "Describe this image in detail."
+            },
+            %{
+              "type" => "image_url",
+              "image_url" => %{"url" => "data:image/png;base64,#{b64}"}
+            }
+          ]
+        }
+      ],
+      "max_tokens" => 512
+    }
+
+    case Req.post(req(),
+           url: "#{url}/chat/completions",
+           json: body,
+           receive_timeout: 120_000
+         ) do
+      {:ok, %{status: 200, body: resp_body}} ->
+        with content when is_binary(content) <-
+               get_in(resp_body, ["choices", Access.at(0), "message", "content"]) do
+          {:ok, String.trim(content)}
+        else
+          nil -> {:error, :missing_content}
+        end
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, {:api_error, status, resp_body}}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
+    end
   end
 
   @doc """
@@ -117,22 +175,25 @@ defmodule Librarian.Curator.LlamaCpp do
 
     messages =
       case Keyword.get(opts, :system_prompt) do
-        nil -> [%{"role" => "user", "content" => scrubbed_prompt}]
-        prompt_text -> [
-          %{"role" => "system", "content" => prompt_text},
-          %{"role" => "user", "content" => scrubbed_prompt}
-        ]
+        nil ->
+          [%{"role" => "user", "content" => scrubbed_prompt}]
+
+        prompt_text ->
+          [
+            %{"role" => "system", "content" => prompt_text},
+            %{"role" => "user", "content" => scrubbed_prompt}
+          ]
       end
 
-      response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
+    response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
 
-      body = %{
-        "model" => model_name(),
-        "messages" => messages,
-        "response_format" => response_format,
-        "temperature" => temperature,
-        "max_tokens" => 512
-      }
+    body = %{
+      "model" => model_name(),
+      "messages" => messages,
+      "response_format" => response_format,
+      "temperature" => temperature,
+      "max_tokens" => 512
+    }
 
     case Req.post(req(),
            url: "#{url}/chat/completions",

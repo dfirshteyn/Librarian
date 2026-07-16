@@ -23,7 +23,7 @@ defmodule LibrarianWeb.ApiController do
       # Handle multipart file uploads
       params =
         if conn.private[:phoenix_format] == "multipart" ||
-           conn.path_info == ["api", "ingest"] && has_multipart?(conn) do
+             (conn.path_info == ["api", "ingest"] && has_multipart?(conn)) do
           extract_file_from_multipart(conn, params)
         else
           params
@@ -86,6 +86,80 @@ defmodule LibrarianWeb.ApiController do
   def recall(conn, _params) do
     conn |> put_status(400) |> json(%{ok: false, error: "missing query param ?q="})
   end
+
+  @doc """
+  GET /api/recall/ancestry?id=<memory_id>&depth=5
+  Optional header: X-User-Id (defaults to "local")
+
+  Returns the full recursive ancestry tree for a memory, each node enriched
+  with its summary, raw original, and embedding presence. Used by agents /
+  the dashboard to trace how a memory was derived, merged, or cross-linked.
+  """
+  def recall_ancestry(conn, %{"id" => id}) do
+    user_id = get_user_id(conn)
+    depth = parse_int(conn.params["depth"], 5)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case Integer.parse(to_string(id)) do
+        {memory_id, ""} ->
+          tree = Librarian.Ancestry.get_tree(memory_id, user_id, depth)
+          json(conn, %{ok: true, memory_id: memory_id, user_id: user_id, tree: tree})
+
+        _ ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "invalid id param (expected integer)"})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def recall_ancestry(conn, _params) do
+    conn |> put_status(400) |> json(%{ok: false, error: "missing query param ?id="})
+  end
+
+  @doc """
+  GET /api/recall/progressive?q=<query>&limit=5
+  Optional header: X-User-Id (defaults to "local")
+
+  Progressive-disclosure recall: returns the top summary cards for the query,
+  each with its linked raw original, chunk children, parents, and cross-bucket
+  links — so an agent can drill from a clean card into the underlying source.
+  """
+  def recall_progressive(conn, %{"q" => query}) do
+    user_id = get_user_id(conn)
+    limit = parse_int(conn.params["limit"], 5)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      result = Librarian.Ancestry.progressive_recall(query, user_id, limit: limit)
+      json(conn, Map.put(result, :ok, true))
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def recall_progressive(conn, _params) do
+    conn |> put_status(400) |> json(%{ok: false, error: "missing query param ?q="})
+  end
+
+  defp parse_int(nil, default), do: default
+
+  defp parse_int(value, default) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> default
+    end
+  end
+
+  defp parse_int(value, _default) when is_integer(value), do: value
+  defp parse_int(_, _default), do: nil
 
   @doc """
   GET /api/health/curator
@@ -195,8 +269,18 @@ defmodule LibrarianWeb.ApiController do
 
         conn
         |> put_resp_content_type("application/json")
-        |> put_resp_header("content-disposition", "attachment; filename=\"#{user_id}_memories.json\"")
-        |> send_resp(200, Librarian.Json.encode!(%{user_id: user_id, exported_at: DateTime.to_iso8601(DateTime.utc_now()), memories: memories}))
+        |> put_resp_header(
+          "content-disposition",
+          "attachment; filename=\"#{user_id}_memories.json\""
+        )
+        |> send_resp(
+          200,
+          Librarian.Json.encode!(%{
+            user_id: user_id,
+            exported_at: DateTime.to_iso8601(DateTime.utc_now()),
+            memories: memories
+          })
+        )
       else
         conn
         |> put_status(404)
@@ -222,14 +306,43 @@ defmodule LibrarianWeb.ApiController do
     cold =
       try do
         conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
-        {:ok, result} = Exqlite.query(conn, "SELECT id, bucket, summary, facts, tags, importance, created_at, last_accessed_at FROM memories ORDER BY created_at DESC", [])
-        result.rows |> Enum.map(fn [id, bucket, summary, facts, tags, importance, created_at, last_accessed_at] ->
+
+        {:ok, result} =
+          Exqlite.query(
+            conn,
+            "SELECT id, bucket, summary, facts, tags, importance, created_at, last_accessed_at FROM memories ORDER BY created_at DESC",
+            []
+          )
+
+        result.rows
+        |> Enum.map(fn [
+                         id,
+                         bucket,
+                         summary,
+                         facts,
+                         tags,
+                         importance,
+                         created_at,
+                         last_accessed_at
+                       ] ->
           %{
             id: id,
             bucket: bucket,
             summary: summary,
-            facts: facts |> Librarian.Json.decode() |> case do {:ok, v} -> v; _ -> [] end,
-            tags: tags |> Librarian.Json.decode() |> case do {:ok, v} -> v; _ -> [] end,
+            facts:
+              facts
+              |> Librarian.Json.decode()
+              |> case do
+                {:ok, v} -> v
+                _ -> []
+              end,
+            tags:
+              tags
+              |> Librarian.Json.decode()
+              |> case do
+                {:ok, v} -> v
+                _ -> []
+              end,
             importance: importance,
             created_at: created_at,
             last_accessed_at: last_accessed_at
@@ -304,7 +417,12 @@ defmodule LibrarianWeb.ApiController do
         {:error, {:bucket_limit_reached, limit}} ->
           conn
           |> put_status(422)
-          |> json(%{ok: false, error: "bucket limit (#{limit}) reached", user_id: user_id, limit: limit})
+          |> json(%{
+            ok: false,
+            error: "bucket limit (#{limit}) reached",
+            user_id: user_id,
+            limit: limit
+          })
 
         {:error, reason} ->
           conn
@@ -370,7 +488,10 @@ defmodule LibrarianWeb.ApiController do
 
   def rename_bucket(conn, _params) do
     user_id = get_user_id(conn)
-    conn |> put_status(422) |> json(%{ok: false, error: "missing name or new_name", user_id: user_id})
+
+    conn
+    |> put_status(422)
+    |> json(%{ok: false, error: "missing name or new_name", user_id: user_id})
   end
 
   @doc """
@@ -443,7 +564,10 @@ defmodule LibrarianWeb.ApiController do
         is_nil(embedding) or not is_list(embedding) ->
           conn
           |> put_status(422)
-          |> json(%{ok: false, error: "missing or invalid embedding (requires list of #{expected_dims} floats)"})
+          |> json(%{
+            ok: false,
+            error: "missing or invalid embedding (requires list of #{expected_dims} floats)"
+          })
 
         length(embedding) != expected_dims ->
           conn
@@ -543,7 +667,10 @@ defmodule LibrarianWeb.ApiController do
         _ ->
           conn
           |> put_status(400)
-          |> json(%{ok: false, error: "missing file field — upload a file with field name 'file'"})
+          |> json(%{
+            ok: false,
+            error: "missing file field — upload a file with field name 'file'"
+          })
       end
     else
       {:error, :budget_exhausted} ->

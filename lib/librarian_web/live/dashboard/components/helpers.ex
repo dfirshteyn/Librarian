@@ -65,6 +65,7 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
   Human-readable file type badge for media attachments.
   """
   def file_badge(nil), do: ""
+
   def file_badge(mime) when is_binary(mime) do
     cond do
       String.starts_with?(mime, "image/") -> "📷 Image"

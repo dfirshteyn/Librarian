@@ -35,7 +35,8 @@ defmodule Librarian.Auth do
   with the configured endpoint's secret_key_base.
   """
   def sign(claim, opts \\ []) when is_map(claim) do
-    max_age = Access.get(opts, :max_age, 86_400) # 24 hours default
+    # 24 hours default
+    max_age = Access.get(opts, :max_age, 86_400)
     Phoenix.Token.sign(LibrarianWeb.Endpoint, @salt, claim, max_age: max_age)
   end
 

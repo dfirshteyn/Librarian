@@ -51,11 +51,13 @@ defmodule Librarian.CouncilTest do
   describe "Librarian.Council" do
     @tag :skip
     test "stage_one returns all persona takes" do
-      content = "The system migrated from Postgres to SQLite for simplicity. Deploy to production occurred at 3pm."
+      content =
+        "The system migrated from Postgres to SQLite for simplicity. Deploy to production occurred at 3pm."
 
       takes = Council.stage_one(content)
 
       assert length(takes) == 4
+
       for {persona, result} <- takes do
         assert persona in Persona.available_personas()
         assert elem(result, 0) in [:ok, :error]

@@ -135,19 +135,4 @@ defmodule Librarian.Utils.FileStore do
   defp generate_uuid do
     Ecto.UUID.generate()
   end
-
-  defp mime_type(ext) do
-    case ext do
-      ".png" -> "image/png"
-      ".jpg" -> "image/jpeg"
-      ".jpeg" -> "image/jpeg"
-      ".gif" -> "image/gif"
-      ".webp" -> "image/webp"
-      ".svg" -> "image/svg+xml"
-      ".pdf" -> "application/pdf"
-      ".md" -> "text/markdown"
-      ".txt" -> "text/plain"
-      _ -> "application/octet-stream"
-    end
-  end
 end

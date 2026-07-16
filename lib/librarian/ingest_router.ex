@@ -68,16 +68,20 @@ defmodule Librarian.IngestRouter do
     # Detect file type if filename provided
     file_type =
       params["file_type"] ||
-      (params["original_filename"] && FileDetector.mime_type(params["original_filename"]))
+        (params["original_filename"] && FileDetector.mime_type(params["original_filename"]))
 
     # Handle file_data (base64-encoded binary from multipart upload)
     # If present, decode it for storage
     original_data =
       cond do
-        is_binary(params["file_data"]) -> params["file_data"]
+        is_binary(params["file_data"]) ->
+          params["file_data"]
+
         is_binary(params["raw_text"]) && FileDetector.is_base64?(params["raw_text"]) ->
           params["raw_text"]
-        true -> nil
+
+        true ->
+          nil
       end
 
     # Build payload with enhanced metadata
@@ -120,7 +124,7 @@ defmodule Librarian.IngestRouter do
 
   # --- Image processing ---
 
-  defp process_image(payload, user_id) do
+  defp process_image(%Payload{} = payload, user_id) do
     # 1. Get the image data (from original_data or raw_text)
     image_data = payload.original_data || payload.raw_text
 
@@ -137,11 +141,13 @@ defmodule Librarian.IngestRouter do
 
     # 4. Store the file
     filename = payload.original_filename || "image.png"
-    {:ok, stored_path} = FileStore.store(
-      user_id: user_id,
-      filename: filename,
-      data: raw_binary
-    )
+
+    {:ok, stored_path} =
+      FileStore.store(
+        user_id: user_id,
+        filename: filename,
+        data: raw_binary
+      )
 
     # 5. Call Qwen-VL for description
     description =
@@ -152,12 +158,13 @@ defmodule Librarian.IngestRouter do
 
     # 6. Build return payload with description as raw_text + file metadata
     return_payload = %Payload{
-      payload |
-      raw_text: "Image: #{filename}\n\n#{description}",
-      raw_extraction: description,
-      stored_path: stored_path,
-      dimensions: dimensions,
-      original_data: nil  # Don't keep binary in memory
+      payload
+      | raw_text: "Image: #{filename}\n\n#{description}",
+        raw_extraction: description,
+        stored_path: stored_path,
+        dimensions: dimensions,
+        # Don't keep binary in memory
+        original_data: nil
     }
 
     {:ok, return_payload}
@@ -167,7 +174,7 @@ defmodule Librarian.IngestRouter do
 
   # --- PDF processing ---
 
-  defp process_pdf(payload, user_id) do
+  defp process_pdf(%Payload{} = payload, user_id) do
     # 1. Get the PDF data
     pdf_data = payload.original_data || payload.raw_text
 
@@ -181,11 +188,13 @@ defmodule Librarian.IngestRouter do
 
     # 3. Store the file
     filename = payload.original_filename || "document.pdf"
-    {:ok, stored_path} = FileStore.store(
-      user_id: user_id,
-      filename: filename,
-      data: raw_binary
-    )
+
+    {:ok, stored_path} =
+      FileStore.store(
+        user_id: user_id,
+        filename: filename,
+        data: raw_binary
+      )
 
     # 4. Extract markdown using pdf_oxide with detect_headings
     markdown =
@@ -196,11 +205,12 @@ defmodule Librarian.IngestRouter do
 
     # 5. Build return payload with extracted markdown as raw_text + file metadata
     return_payload = %Payload{
-      payload |
-      raw_text: "Document: #{filename}\n\n#{markdown}",
-      raw_extraction: markdown,
-      stored_path: stored_path,
-      original_data: nil  # Don't keep binary in memory
+      payload
+      | raw_text: "Document: #{filename}\n\n#{markdown}",
+        raw_extraction: markdown,
+        stored_path: stored_path,
+        # Don't keep binary in memory
+        original_data: nil
     }
 
     {:ok, return_payload}
@@ -212,7 +222,7 @@ defmodule Librarian.IngestRouter do
 
   defp extract_image_dimensions(binary_data) when is_binary(binary_data) do
     case ExImageInfo.info(binary_data) do
-      {_mime, width, height} when is_integer(width) and is_integer(height) ->
+      {_mime, width, height, _format} when is_integer(width) and is_integer(height) ->
         "#{width}x#{height}"
 
       _ ->
@@ -228,8 +238,9 @@ defmodule Librarian.IngestRouter do
 
   defp should_chunk?(%Payload{raw_text: text, file_type: file_type})
        when is_binary(text) do
-    threshold = Application.get_env(:librarian, :ingest, [])
-               |> Keyword.get(:large_text_threshold, @default_large_text_threshold)
+    threshold =
+      Application.get_env(:librarian, :ingest, [])
+      |> Keyword.get(:large_text_threshold, @default_large_text_threshold)
 
     cond do
       # Don't chunk images — their description text is usually short
@@ -247,17 +258,21 @@ defmodule Librarian.IngestRouter do
   defp should_chunk?(_), do: false
 
   defp ingest_chunks(%Payload{} = payload, correlation_id, user_id) do
-    chunk_size = Application.get_env(:librarian, :ingest, [])
-                |> Keyword.get(:chunk_size, @default_chunk_size)
-    overlap = Application.get_env(:librarian, :ingest, [])
-               |> Keyword.get(:chunk_overlap, @default_chunk_overlap)
+    chunk_size =
+      Application.get_env(:librarian, :ingest, [])
+      |> Keyword.get(:chunk_size, @default_chunk_size)
+
+    overlap =
+      Application.get_env(:librarian, :ingest, [])
+      |> Keyword.get(:chunk_overlap, @default_chunk_overlap)
 
     # Chunk the text
-    chunks = Chunker.split_document(payload.raw_text,
-      chunk_size: chunk_size,
-      overlap: overlap,
-      correlation_id: correlation_id
-    )
+    chunks =
+      Chunker.split_document(payload.raw_text,
+        chunk_size: chunk_size,
+        overlap: overlap,
+        correlation_id: correlation_id
+      )
 
     total_chunks = length(chunks)
 
@@ -270,11 +285,12 @@ defmodule Librarian.IngestRouter do
       |> Task.async_stream(
         fn %{text: chunk_text, metadata: meta} ->
           chunk_payload = %Payload{
-            payload |
-            raw_text: chunk_text,
-            parent_id: correlation_id,
-            chunk_index: meta.chunk_index
+            payload
+            | raw_text: chunk_text,
+              parent_id: correlation_id,
+              chunk_index: meta.chunk_index
           }
+
           Librarian.ingest(chunk_payload, user_id)
         end,
         timeout: 30_000,
@@ -285,7 +301,9 @@ defmodule Librarian.IngestRouter do
 
     # Check results
     case Enum.any?(results, &match?({:error, _}, &1)) do
-      true -> {:error, "Some chunks failed to ingest"}
+      true ->
+        {:error, "Some chunks failed to ingest"}
+
       false ->
         case List.first(results) do
           {:ok, {:ok, bucket}} -> {:ok, bucket, length(chunks)}

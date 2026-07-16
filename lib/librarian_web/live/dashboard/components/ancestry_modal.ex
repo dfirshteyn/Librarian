@@ -3,9 +3,9 @@ defmodule LibrarianWeb.Dashboard.Components.AncestryModal do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :memory_id, :integer, required: true
-  attr :tenant_id, :string, required: true
-  attr :ancestry, :list, required: true
+  attr(:memory_id, :integer, required: true)
+  attr(:tenant_id, :string, required: true)
+  attr(:ancestry, :list, required: true)
 
   def ancestry_modal(assigns) do
     ~H"""
@@ -42,18 +42,30 @@ defmodule LibrarianWeb.Dashboard.Components.AncestryModal do
                   <div class="flex-1 h-px bg-gray-700"></div>
                 </div>
                 <div class="space-y-2 ml-4 border-l-2 border-gray-700 pl-4">
-                  <%= for rel <- rels do %>
-                    <div class="flex items-center gap-2 text-sm">
-                      <span class="text-gray-400"><%= relationship_badge(rel.type) %></span>
-                      <span class="text-gray-500">#<%= rel.source_id %></span>
-                      <span class="text-gray-600">→</span>
-                      <span class="text-gray-300 font-mono">#<%= rel.target_id %></span>
-                      <%= if rel.metadata && rel.metadata["similarity"] do %>
-                        <span class="text-gray-600 text-xs">(sim: <%= Float.round(rel.metadata["similarity"], 2) %>)</span>
-                      <% end %>
-                      <span class="text-gray-600 text-xs ml-auto"><%= rel.created_at %></span>
-                    </div>
-                  <% end %>
+                   <%= for rel <- rels do %>
+                     <div class="flex items-center gap-2 text-sm">
+                       <span class="text-gray-400"><%= relationship_badge(rel.type) %></span>
+                       <span class="text-gray-500">#<%= rel.source_id %></span>
+                       <span class="text-gray-600">→</span>
+                       <span class="text-gray-300 font-mono">#<%= rel.target_id %></span>
+                       <%= if rel.metadata && rel.metadata["similarity"] do %>
+                         <span class="text-gray-600 text-xs">(sim: <%= Float.round(rel.metadata["similarity"], 2) %>)</span>
+                       <% end %>
+                       <span class="text-gray-600 text-xs ml-auto"><%= rel.created_at %></span>
+                     </div>
+                     <%= if rel.source_raw do %>
+                       <details class="ml-4 mt-1">
+                         <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 source #<%= rel.source_id %> raw original</summary>
+                         <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(rel.source_raw, 0, 500) %></pre>
+                       </details>
+                     <% end %>
+                     <%= if rel.target_raw do %>
+                       <details class="ml-4 mt-1">
+                         <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 target #<%= rel.target_id %> raw original</summary>
+                         <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(rel.target_raw, 0, 500) %></pre>
+                       </details>
+                     <% end %>
+                   <% end %>
                 </div>
               </div>
             <% end %>

@@ -19,7 +19,14 @@ defmodule Librarian.Council do
 
   Returns {:ok, final_result} or {:error, reason}
   """
-  @spec deliberate(String.t()) :: {:ok, %{synthesis: String.t(), persona_takes: %{optional(atom()) => String.t()}, failures: list()}} | {:error, term()}
+  @spec deliberate(String.t()) ::
+          {:ok,
+           %{
+             synthesis: String.t(),
+             persona_takes: %{optional(atom()) => String.t()},
+             failures: list()
+           }}
+          | {:error, term()}
   def deliberate(content) when is_binary(content) do
     personas = Persona.available_personas()
 
@@ -51,8 +58,7 @@ defmodule Librarian.Council do
       end)
       |> Enum.split_with(&match?({:ok, _}, &1))
       |> then(fn {successes, failures} ->
-        {Enum.map(successes, &elem(&1, 1)),
-         Enum.map(failures, &elem(&1, 1))}
+        {Enum.map(successes, &elem(&1, 1)), Enum.map(failures, &elem(&1, 1))}
       end)
 
     # Log failures for visibility (same pattern as ParentSummarizer)
@@ -75,11 +81,12 @@ defmodule Librarian.Council do
     else
       case Judge.synthesize(content, successes) do
         {:ok, synthesis} ->
-          {:ok, %{
-            persona_takes: persona_takes_by_name(successes),
-            failures: failures,
-            synthesis: synthesis
-          }}
+          {:ok,
+           %{
+             persona_takes: persona_takes_by_name(successes),
+             failures: failures,
+             synthesis: synthesis
+           }}
 
         {:error, reason} ->
           {:error, reason}
@@ -113,7 +120,14 @@ defmodule Librarian.Council do
   @doc """
   Run Council on a memory ID - fetches the memory and runs deliberation.
   """
-  @spec deliberate_on_memory(integer()) :: {:ok, %{synthesis: String.t(), persona_takes: %{optional(atom()) => String.t()}, failures: list()}} | {:error, term()}
+  @spec deliberate_on_memory(integer()) ::
+          {:ok,
+           %{
+             synthesis: String.t(),
+             persona_takes: %{optional(atom()) => String.t()},
+             failures: list()
+           }}
+          | {:error, term()}
   def deliberate_on_memory(memory_id) when is_integer(memory_id) do
     case Librarian.WarmStore.get(memory_id) do
       nil ->
@@ -242,7 +256,8 @@ defmodule Librarian.Council do
   defp persona_takes_by_name(persona_takes) do
     Enum.map(persona_takes, fn {persona, take} ->
       {Librarian.Council.Persona.config(persona).name, take}
-    end) |> Map.new()
+    end)
+    |> Map.new()
   end
 
   # Check if all failures were connection-level errors (server unreachable pattern)

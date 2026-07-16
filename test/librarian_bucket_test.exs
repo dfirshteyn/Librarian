@@ -5,22 +5,22 @@ defmodule Librarian.BucketTest do
 
   describe "parse/1" do
     test "2-part legacy form" do
-      assert { "u", nil, "research" } = Bucket.parse("u:research")
+      assert {"u", nil, "research"} = Bucket.parse("u:research")
     end
 
     test "3-part future form" do
-      assert { "User_A", "Project_ABC", "Research" } =
+      assert {"User_A", "Project_ABC", "Research"} =
                Bucket.parse("User_A:Project_ABC:Research")
     end
 
     test "bare name" do
-      assert { nil, nil, "inbox" } = Bucket.parse("inbox")
+      assert {nil, nil, "inbox"} = Bucket.parse("inbox")
     end
 
     test "unexpected garbage (3-ish part) hits 3-part branch" do
       # "weird::" -> split on ":" -> ["weird", "", "", ""] -> [u, p, n]
       # (a 4-empty-element list matches the 3-part pattern first)
-      assert { nil, nil, "weird:::" } = Bucket.parse("weird:::")
+      assert {nil, nil, "weird:::"} = Bucket.parse("weird:::")
     end
   end
 
@@ -36,7 +36,7 @@ defmodule Librarian.BucketTest do
 
     test "roundtrip: format then parse is stable" do
       key = Bucket.format("User_A", "Project_ABC", "Research")
-      assert { "User_A", "Project_ABC", "Research" } = Bucket.parse(key)
+      assert {"User_A", "Project_ABC", "Research"} = Bucket.parse(key)
     end
   end
 

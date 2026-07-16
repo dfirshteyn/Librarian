@@ -3,11 +3,11 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :tenant_id, :string, required: true
-  attr :ingest_text, :string, required: true
-  attr :ingest_bucket, :string, required: true
-  attr :feed_empty, :boolean, required: true
-  attr :streams, :map, required: true
+  attr(:tenant_id, :string, required: true)
+  attr(:ingest_text, :string, required: true)
+  attr(:ingest_bucket, :string, required: true)
+  attr(:feed_empty, :boolean, required: true)
+  attr(:streams, :map, required: true)
 
   def ingest_feed(assigns) do
     ~H"""

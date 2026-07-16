@@ -49,6 +49,8 @@ defmodule LibrarianWeb.Router do
     post("/ingest/file", ApiController, :ingest_file)
     post("/flush", ApiController, :flush)
     get("/recall", ApiController, :recall)
+    get("/recall/ancestry", ApiController, :recall_ancestry)
+    get("/recall/progressive", ApiController, :recall_progressive)
     get("/status", ApiController, :status)
     get("/export", ApiController, :export)
     get("/health/curator", ApiController, :curator_health)

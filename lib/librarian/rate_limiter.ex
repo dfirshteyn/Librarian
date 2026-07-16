@@ -18,9 +18,12 @@ defmodule Librarian.RateLimiter do
   """
 
   @table :rate_limiter
-  @window_ms 60_000  # 1 minute sliding window
-  @max_requests 100  # 100 requests per window
-  @burst_max 200     # burst up to 200
+  # 1 minute sliding window
+  @window_ms 60_000
+  # 100 requests per window
+  @max_requests 100
+  # burst up to 200
+  @burst_max 200
 
   @doc """
   Initialize the ETS table. Called from Application.start.
@@ -31,6 +34,7 @@ defmodule Librarian.RateLimiter do
       :undefined ->
         :ets.new(@table, [:set, :named_table, :public])
         :ok
+
       _ ->
         :ok
     end
@@ -80,6 +84,7 @@ defmodule Librarian.RateLimiter do
     case :ets.lookup(@table, key) do
       [{^key, timestamps}] ->
         Enum.count(timestamps, &(&1 > window_start))
+
       [] ->
         0
     end

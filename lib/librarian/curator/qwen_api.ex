@@ -22,7 +22,13 @@ defmodule Librarian.Curator.QwenApi do
 
   @impl true
   def describe_image(image_data, opts \\ []) do
-    prompt = Keyword.get(opts, :prompt, "Describe this image in detail, including any text, objects, people, and the overall scene.")
+    prompt =
+      Keyword.get(
+        opts,
+        :prompt,
+        "Describe this image in detail, including any text, objects, people, and the overall scene."
+      )
+
     model = vision_model()
 
     api_key =
@@ -149,28 +155,34 @@ defmodule Librarian.Curator.QwenApi do
 
     messages =
       case Keyword.get(opts, :system_prompt) do
-        nil -> [%{"role" => "user", "content" => prompt}]
-        prompt_text -> [
-          %{"role" => "system", "content" => prompt_text},
-          %{"role" => "user", "content" => prompt}
-        ]
+        nil ->
+          [%{"role" => "user", "content" => prompt}]
+
+        prompt_text ->
+          [
+            %{"role" => "system", "content" => prompt_text},
+            %{"role" => "user", "content" => prompt}
+          ]
       end
 
     temperature = Keyword.get(opts, :temperature)
 
     body =
       case temperature do
-        nil -> %{
-          "model" => @model,
-          "messages" => messages,
-          "response_format" => %{"type" => "json_object"}
-        }
-        _ -> %{
-          "model" => @model,
-          "messages" => messages,
-          "response_format" => %{"type" => "json_object"},
-          "temperature" => temperature
-        }
+        nil ->
+          %{
+            "model" => @model,
+            "messages" => messages,
+            "response_format" => %{"type" => "json_object"}
+          }
+
+        _ ->
+          %{
+            "model" => @model,
+            "messages" => messages,
+            "response_format" => %{"type" => "json_object"},
+            "temperature" => temperature
+          }
       end
 
     case Req.post(req(),
@@ -211,15 +223,15 @@ defmodule Librarian.Curator.QwenApi do
     with content when is_binary(content) <-
            get_in(body, ["choices", Access.at(0), "message", "content"]),
          {:ok, map} <- Librarian.Json.decode(content) do
-        {:ok,
-         %Librarian.Curator.Result{
-           summary: map["summary"] || "",
-           facts: map["facts"] || [],
-           tags: map["tags"] || [],
-           importance: to_float(map["importance"]),
-           bucket: Librarian.Router.normalize_bucket(map["bucket"]),
-           embedding: nil
-         }}
+      {:ok,
+       %Librarian.Curator.Result{
+         summary: map["summary"] || "",
+         facts: map["facts"] || [],
+         tags: map["tags"] || [],
+         importance: to_float(map["importance"]),
+         bucket: Librarian.Router.normalize_bucket(map["bucket"]),
+         embedding: nil
+       }}
     else
       nil -> {:error, :missing_content}
       {:error, _} = err -> err

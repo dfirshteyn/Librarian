@@ -165,12 +165,15 @@ defmodule Librarian.WsServer do
             send_text(client, Librarian.Json.encode(%{"ok" => true, "bucket" => bucket}))
 
           {:ok, bucket, chunk_count} ->
-            send_text(client, Librarian.Json.encode(%{
-              "ok" => true,
-              "bucket" => bucket,
-              "chunk_count" => chunk_count,
-              "note" => "Document auto-chunked into #{chunk_count} pieces"
-            }))
+            send_text(
+              client,
+              Librarian.Json.encode(%{
+                "ok" => true,
+                "bucket" => bucket,
+                "chunk_count" => chunk_count,
+                "note" => "Document auto-chunked into #{chunk_count} pieces"
+              })
+            )
 
           {:error, reason} ->
             send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => inspect(reason)}))

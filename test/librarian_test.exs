@@ -621,7 +621,8 @@ defmodule Librarian.BucketCRUDTest do
     end
 
     test "rejects renaming the system inbox bucket" do
-      assert {:error, :cannot_modify_system_bucket} = Librarian.rename_bucket("inbox", "not_inbox", @test_user)
+      assert {:error, :cannot_modify_system_bucket} =
+               Librarian.rename_bucket("inbox", "not_inbox", @test_user)
     end
 
     test "rejects renaming to a system bucket name" do
@@ -630,13 +631,16 @@ defmodule Librarian.BucketCRUDTest do
     end
 
     test "returns not_found for non-existent bucket" do
-      assert {:error, :not_found} = Librarian.rename_bucket("nonexistent", "something", @test_user)
+      assert {:error, :not_found} =
+               Librarian.rename_bucket("nonexistent", "something", @test_user)
     end
 
     test "rejects renaming to an already existing name" do
       assert {:ok, "bucket_a"} = Librarian.create_bucket("bucket_a", @test_user)
       assert {:ok, "bucket_b"} = Librarian.create_bucket("bucket_b", @test_user)
-      assert {:error, :already_exists} = Librarian.rename_bucket("bucket_a", "bucket_b", @test_user)
+
+      assert {:error, :already_exists} =
+               Librarian.rename_bucket("bucket_a", "bucket_b", @test_user)
     end
 
     test "renaming preserves memories across tiers" do
@@ -645,10 +649,14 @@ defmodule Librarian.BucketCRUDTest do
       assert {:ok, "project"} = Librarian.create_bucket("project", @test_user)
 
       # Ingest something that the Stub curator will classify as "project"
-      {:ok, inbox} = Librarian.ingest(%{
-        "source" => "test",
-        "raw_text" => "we decided to deploy the new router for this project"
-      }, @test_user)
+      {:ok, inbox} =
+        Librarian.ingest(
+          %{
+            "source" => "test",
+            "raw_text" => "we decided to deploy the new router for this project"
+          },
+          @test_user
+        )
 
       assert inbox == "#{@test_user}:inbox"
 
@@ -657,7 +665,8 @@ defmodule Librarian.BucketCRUDTest do
       assert memory.bucket == "#{@test_user}:project"
 
       # Rename the bucket
-      assert {:ok, "renamed_project"} = Librarian.rename_bucket("project", "renamed_project", @test_user)
+      assert {:ok, "renamed_project"} =
+               Librarian.rename_bucket("project", "renamed_project", @test_user)
 
       # The memory should now be in the renamed bucket
       %{warm: warm} = Librarian.recall("deploy", @test_user)
@@ -689,10 +698,14 @@ defmodule Librarian.BucketCRUDTest do
       assert {:ok, "project"} = Librarian.create_bucket("project", @test_user)
 
       # Ingest and flush to create a WARM memory
-      {:ok, inbox} = Librarian.ingest(%{
-        "source" => "test",
-        "raw_text" => "we decided to deploy the new router for this project"
-      }, @test_user)
+      {:ok, inbox} =
+        Librarian.ingest(
+          %{
+            "source" => "test",
+            "raw_text" => "we decided to deploy the new router for this project"
+          },
+          @test_user
+        )
 
       assert {:ok, [memory]} = Librarian.Flusher.flush_bucket(inbox)
       assert memory.bucket == "#{@test_user}:project"
@@ -705,7 +718,12 @@ defmodule Librarian.BucketCRUDTest do
 
       # Memory should be findable in COLD by the original bucket field
       conn = Librarian.ColdStore.ConnectionManager.get_conn(@test_user)
-      {:ok, %{rows: rows}} = Exqlite.query(conn, "SELECT bucket, summary FROM memories WHERE bucket = ?1", ["#{@test_user}:project"])
+
+      {:ok, %{rows: rows}} =
+        Exqlite.query(conn, "SELECT bucket, summary FROM memories WHERE bucket = ?1", [
+          "#{@test_user}:project"
+        ])
+
       assert length(rows) >= 1
       archived_bucket = rows |> hd() |> List.first()
       assert archived_bucket == "#{@test_user}:project"
@@ -723,16 +741,28 @@ defmodule Librarian.BucketCRUDTest do
       assert {:ok, "project_chunks"} = Librarian.create_bucket("project_chunks", @test_user)
 
       # Create a parent memory in "project"
-      parent = Librarian.WarmStore.put(
-        "#{@test_user}:project",
-        %Librarian.Curator.Result{summary: "parent doc", facts: [], tags: ["doc"], importance: 0.8}
-      )
+      parent =
+        Librarian.WarmStore.put(
+          "#{@test_user}:project",
+          %Librarian.Curator.Result{
+            summary: "parent doc",
+            facts: [],
+            tags: ["doc"],
+            importance: 0.8
+          }
+        )
 
       # Create a child memory in "project_chunks"
-      child = Librarian.WarmStore.put(
-        "#{@test_user}:project_chunks",
-        %Librarian.Curator.Result{summary: "child chunk", facts: [], tags: ["chunk"], importance: 0.5}
-      )
+      child =
+        Librarian.WarmStore.put(
+          "#{@test_user}:project_chunks",
+          %Librarian.Curator.Result{
+            summary: "child chunk",
+            facts: [],
+            tags: ["chunk"],
+            importance: 0.5
+          }
+        )
 
       # Log a chunk_of relationship: child -> parent
       Librarian.ColdStore.log_relationship(
@@ -744,7 +774,8 @@ defmodule Librarian.BucketCRUDTest do
       )
 
       # Verify ancestry resolves before delete — should show the child
-      lineage_before = Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
+      lineage_before =
+        Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
 
       # Outgoing should be empty (parent doesn't point to anything)
       assert lineage_before.outgoing == []
@@ -761,21 +792,26 @@ defmodule Librarian.BucketCRUDTest do
       assert Librarian.WarmStore.get(child.id) == nil
 
       # Ancestry should still resolve — the relationship edge is NOT severed
-      lineage_after = Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
+      lineage_after =
+        Librarian.ColdStore.get_memory_lineage(Integer.to_string(parent.id), @test_user)
+
       assert length(lineage_after.incoming) >= 1
       incoming_ids_after = Enum.map(lineage_after.incoming, & &1.source_id)
+
       assert Integer.to_string(child.id) in incoming_ids_after,
-        "ancestry query must still surface the archived child's relationship edge"
+             "ancestry query must still surface the archived child's relationship edge"
 
       # Full recursive ancestry should also resolve
       ancestry = Librarian.ColdStore.get_memory_ancestry(Integer.to_string(parent.id), @test_user)
       assert length(ancestry) >= 1
       ancestry_source_ids = Enum.map(ancestry, & &1.source_id)
       ancestry_target_ids = Enum.map(ancestry, & &1.target_id)
+
       assert Integer.to_string(child.id) in ancestry_source_ids,
-        "recursive ancestry must include the archived child as a source"
+             "recursive ancestry must include the archived child as a source"
+
       assert Integer.to_string(parent.id) in ancestry_target_ids,
-        "recursive ancestry must include the parent as a target"
+             "recursive ancestry must include the parent as a target"
     end
   end
 

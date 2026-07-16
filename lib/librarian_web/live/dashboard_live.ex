@@ -272,6 +272,76 @@ defmodule LibrarianWeb.DashboardLive do
     assign(socket, key, Map.put(current, id, %{stage: stage, pct: pct}))
   end
 
+  # ── Helpers (private functions used by handle_event) ──────────────────
+
+  defp raw_for(id_str) when is_binary(id_str) do
+    case Integer.parse(id_str) do
+      {int_id, ""} ->
+        case Librarian.WarmStore.get(int_id) do
+          nil -> nil
+          mem -> mem.raw_original
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp raw_for(_), do: nil
+
+  defp assign_memories(socket, tenant_id) do
+    socket
+    |> assign(:memories, all_memories(tenant_id))
+    |> assign(:superseded_count, WarmStore.superseded_count_for_user(tenant_id))
+  end
+
+  defp all_memories(tenant_id) do
+    WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
+  end
+
+  defp hot_counts(tenant_id) do
+    prefix = tenant_id <> ":"
+
+    HotStore.buckets()
+    |> Enum.filter(&String.starts_with?(&1, prefix))
+    |> Enum.map(fn b -> {b, HotStore.count(b)} end)
+    |> Enum.into(%{})
+  end
+
+  defp compute_token_savings(tenant_id) do
+    memories = WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
+
+    if memories == [] do
+      %{savings_pct: 0, raw_tokens: 0, curated_tokens: 0}
+    else
+      raw_tokens =
+        memories
+        |> Enum.map(fn m ->
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")))
+          |> div(4)
+        end)
+        |> Enum.sum()
+
+      curated_tokens =
+        memories
+        |> Enum.map(fn m ->
+          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")) +
+             String.length(Enum.join(m.tags || [], " ")))
+          |> div(4)
+        end)
+        |> Enum.sum()
+
+      savings_pct =
+        if raw_tokens > 0 do
+          trunc((1 - curated_tokens / max(raw_tokens, 1)) * 100)
+        else
+          0
+        end
+
+      %{savings_pct: savings_pct, raw_tokens: raw_tokens, curated_tokens: curated_tokens}
+    end
+  end
+
   # ── Structured recall commands ─────────────────────────────────────
 
   @impl true
@@ -318,6 +388,38 @@ defmodule LibrarianWeb.DashboardLive do
 
         {:noreply, assign(socket, :structured_response, response)}
 
+      ["/trace" | query_parts] ->
+        query = Enum.join(query_parts, " ")
+
+        result =
+          Librarian.Ancestry.progressive_recall(query, tid,
+            force_local: socket.assigns.force_local
+          )
+
+        response = %{
+          type: "trace_recall",
+          query: query,
+          count: length(result.results),
+          results: result.results
+        }
+
+        {:noreply, assign(socket, :structured_response, response)}
+
+      ["/ancestry" | id_parts] ->
+        id_str = Enum.join(id_parts, " ")
+
+        response =
+          case Integer.parse(String.trim(id_str)) do
+            {memory_id, ""} ->
+              tree = Librarian.Ancestry.get_tree(memory_id, tid)
+              %{type: "ancestry_recall", memory_id: memory_id, depth: 5, tree: tree}
+
+            _ ->
+              %{type: "error", message: "Invalid /ancestry id (expected integer)"}
+          end
+
+        {:noreply, assign(socket, :structured_response, response)}
+
       ["/status"] ->
         status = Librarian.status(tid)
         response = %{type: "status", data: Map.delete(status, [:user_id])}
@@ -352,6 +454,7 @@ defmodule LibrarianWeb.DashboardLive do
     Flusher.flush_all(socket.assigns.tenant_id, socket.assigns.flush_concurrency,
       force_local: socket.assigns.force_local
     )
+
     tid = socket.assigns.tenant_id
 
     {:noreply,
@@ -566,7 +669,18 @@ defmodule LibrarianWeb.DashboardLive do
     memory_id = String.to_integer(id)
     tid = socket.assigns.tenant_id
     tree = Librarian.ColdStore.get_memory_ancestry(to_string(memory_id), tid)
-    {:noreply, assign(socket, ancestry_memory_id: memory_id, ancestry_tree: tree)}
+
+    # Enrich each edge with the linked raw original (progressive disclosure)
+    # of its source/target nodes so the modal can disclose unedited source.
+    enriched =
+      Enum.map(tree, fn rel ->
+        Map.merge(rel, %{
+          source_raw: raw_for(rel.source_id),
+          target_raw: raw_for(rel.target_id)
+        })
+      end)
+
+    {:noreply, assign(socket, ancestry_memory_id: memory_id, ancestry_tree: enriched)}
   end
 
   def handle_event("close_ancestry", _params, socket) do
@@ -665,61 +779,6 @@ defmodule LibrarianWeb.DashboardLive do
   def handle_event(event, params, socket) do
     Logger.debug("Unhandled event #{inspect(event)} with params #{inspect(params)}")
     {:noreply, socket}
-  end
-
-  # ── Helpers ─────────────────────────────────────────────────────────
-
-  defp assign_memories(socket, tenant_id) do
-    socket
-    |> assign(:memories, all_memories(tenant_id))
-    |> assign(:superseded_count, WarmStore.superseded_count_for_user(tenant_id))
-  end
-
-  defp all_memories(tenant_id) do
-    WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
-  end
-
-  defp hot_counts(tenant_id) do
-    prefix = tenant_id <> ":"
-
-    HotStore.buckets()
-    |> Enum.filter(&String.starts_with?(&1, prefix))
-    |> Enum.map(fn b -> {b, HotStore.count(b)} end)
-    |> Enum.into(%{})
-  end
-
-  defp compute_token_savings(tenant_id) do
-    memories = WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)
-
-    if memories == [] do
-      %{savings_pct: 0, raw_tokens: 0, curated_tokens: 0}
-    else
-      raw_tokens =
-        memories
-        |> Enum.map(fn m ->
-          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")))
-          |> div(4)
-        end)
-        |> Enum.sum()
-
-      curated_tokens =
-        memories
-        |> Enum.map(fn m ->
-          (String.length(m.summary || "") + String.length(Enum.join(m.facts || [], " ")) +
-             String.length(Enum.join(m.tags || [], " ")))
-          |> div(4)
-        end)
-        |> Enum.sum()
-
-      savings_pct =
-        if raw_tokens > 0 do
-          trunc((1 - curated_tokens / max(raw_tokens, 1)) * 100)
-        else
-          0
-        end
-
-      %{savings_pct: savings_pct, raw_tokens: raw_tokens, curated_tokens: curated_tokens}
-    end
   end
 
   # ── Publish confirm modal ─────────────────────────────────────────────

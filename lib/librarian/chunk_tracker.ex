@@ -90,7 +90,11 @@ defmodule Librarian.ChunkTracker do
         # Unknown correlation_id - this shouldn't happen with proper registration
         # Log warning but don't crash
         require Logger
-        Logger.warning("[ChunkTracker] Received flush for unregistered correlation_id: #{correlation_id}")
+
+        Logger.warning(
+          "[ChunkTracker] Received flush for unregistered correlation_id: #{correlation_id}"
+        )
+
         {:reply, {:error, :not_registered}, state}
     end
   end

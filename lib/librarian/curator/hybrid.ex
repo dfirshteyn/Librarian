@@ -35,6 +35,14 @@ defmodule Librarian.Curator.Hybrid do
   end
 
   @doc """
+  Describe an image using the vision model endpoint.
+  """
+  @impl true
+  def describe_image(image_data, opts) when is_binary(image_data) do
+    Librarian.Curator.LlamaCpp.describe_image(image_data, opts)
+  end
+
+  @doc """
   Embed text using a dedicated embedding model server (e.g., BGE-M3).
   Configured via `config :librarian, embed_url:` — defaults to the
   same URL as llama_cpp_url if not set separately.

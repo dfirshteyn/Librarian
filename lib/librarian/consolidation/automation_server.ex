@@ -14,7 +14,8 @@ defmodule Librarian.Consolidation.AutomationServer do
   # Configurable via application env for testing
   @default_poll_ms 60_000
   @default_min_memories 2
-  @default_sweep_ms 86_400_000  # 24 hours
+  # 24 hours
+  @default_sweep_ms 86_400_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)

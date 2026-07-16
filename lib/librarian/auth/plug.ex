@@ -40,7 +40,8 @@ defmodule Librarian.Auth.Plug do
   """
 
   @default_cookie_key "sandbox_token"
-  @default_cookie_max_age 86_400 # 24 hours
+  # 24 hours
+  @default_cookie_max_age 86_400
   @query_param "tid"
 
   @behaviour Plug

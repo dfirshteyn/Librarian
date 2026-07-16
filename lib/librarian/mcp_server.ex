@@ -157,7 +157,8 @@ defmodule Librarian.McpServer do
           "properties" => %{
             "bucket" => %{
               "type" => "string",
-              "description" => "Specific bucket to flush, or 'all' for all buckets of the given user",
+              "description" =>
+                "Specific bucket to flush, or 'all' for all buckets of the given user",
               "default" => "all"
             },
             "user_id" => %{
@@ -225,7 +226,10 @@ defmodule Librarian.McpServer do
         "inputSchema" => %{
           "type" => "object",
           "properties" => %{
-            "memory_id" => %{"type" => "integer", "description" => "The memory ID to deliberate on"},
+            "memory_id" => %{
+              "type" => "integer",
+              "description" => "The memory ID to deliberate on"
+            },
             "id" => %{"type" => "integer", "description" => "Alternative name for memory_id"}
           },
           "required" => ["memory_id"]
@@ -264,7 +268,10 @@ defmodule Librarian.McpServer do
     tags = args["tags"] || []
     user_id = args["user_id"] || "local"
 
-    case Librarian.IngestRouter.process(%{"source" => source, "raw_text" => text, "hint_tags" => tags}, user_id) do
+    case Librarian.IngestRouter.process(
+           %{"source" => source, "raw_text" => text, "hint_tags" => tags},
+           user_id
+         ) do
       {:ok, bucket} ->
         tool_result(%{
           "ok" => true,
@@ -279,7 +286,8 @@ defmodule Librarian.McpServer do
           "bucket" => bucket,
           "user_id" => user_id,
           "chunk_count" => chunk_count,
-          "note" => "Saved to #{bucket} in #{chunk_count} chunks. Flush to curate into structured memory."
+          "note" =>
+            "Saved to #{bucket} in #{chunk_count} chunks. Flush to curate into structured memory."
         })
 
       {:error, reason} ->
@@ -366,6 +374,33 @@ defmodule Librarian.McpServer do
       tool_result(%{"result" => result})
     else
       tool_result(%{"error" => "missing or invalid memory_id argument"})
+    end
+  end
+
+  defp call_tool("ancestry", args) do
+    memory_id = args["memory_id"] || args["id"]
+    user_id = args["user_id"] || "local"
+    depth = args["depth"] || 5
+
+    if is_integer(memory_id) or (is_binary(memory_id) and memory_id =~ ~r/^\d+$/) do
+      memory_id = if is_binary(memory_id), do: String.to_integer(memory_id), else: memory_id
+      tree = Librarian.Ancestry.get_tree(memory_id, user_id, depth)
+      tool_result(%{"memory_id" => memory_id, "user_id" => user_id, "tree" => tree})
+    else
+      tool_result(%{"error" => "missing or invalid memory_id argument"})
+    end
+  end
+
+  defp call_tool("progressive_recall", args) do
+    query = args["query"]
+    user_id = args["user_id"] || "local"
+    limit = args["limit"] || 5
+
+    if is_binary(query) and query != "" do
+      result = Librarian.Ancestry.progressive_recall(query, user_id, limit: limit)
+      tool_result(result)
+    else
+      tool_result(%{"error" => "missing query argument"})
     end
   end
 

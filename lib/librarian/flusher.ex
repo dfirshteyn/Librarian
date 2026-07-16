@@ -34,7 +34,9 @@ defmodule Librarian.Flusher do
         user_id = bucket |> String.split(":") |> hd()
         curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
 
-        Logger.debug("[Flusher] Flushing #{length(payloads)} payloads from #{bucket} via #{inspect(curator_impl)}")
+        Logger.debug(
+          "[Flusher] Flushing #{length(payloads)} payloads from #{bucket} via #{inspect(curator_impl)}"
+        )
 
         results =
           Enum.map(payloads, fn payload ->
@@ -42,9 +44,14 @@ defmodule Librarian.Flusher do
               {:ok, result} ->
                 result =
                   case Librarian.Curator.embed(result.summary, curator_impl) do
-                    {:ok, vec} -> %{result | embedding: vec}
+                    {:ok, vec} ->
+                      %{result | embedding: vec}
+
                     {:error, embed_err} ->
-                      Logger.warning("[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload")
+                      Logger.warning(
+                        "[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload"
+                      )
+
                       # Put this payload back so a curator/embed failure loses nothing.
                       # Mirrors the summarize-failure branch: the memory is NOT stored,
                       # it's excluded from `succeeded`, and the WAL stays intact so it
@@ -55,7 +62,16 @@ defmodule Librarian.Flusher do
 
                 normalized = Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
                 warm_bucket = "#{user_id}:#{normalized}"
-                memory = Librarian.WarmStore.put(warm_bucket, result, correlation_id: payload.parent_id)
+
+                # Link the scrubbed raw capture to the memory so progressive
+                # disclosure can pull the unedited original instantly on a
+                # vector match — without embedding it into the index.
+                memory =
+                  Librarian.WarmStore.put(warm_bucket, result,
+                    correlation_id: payload.parent_id,
+                    raw_original: payload.raw_text
+                  )
+
                 Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
 
                 # Log ancestry so the HOT→WARM transition is visible in the
@@ -85,7 +101,10 @@ defmodule Librarian.Flusher do
                 {:ok, memory}
 
               {:error, reason} ->
-                Logger.warning("[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload")
+                Logger.warning(
+                  "[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload"
+                )
+
                 # Put this payload back so a curator failure loses nothing.
                 Librarian.HotStore.put(bucket, payload)
                 {:error, reason}
@@ -125,11 +144,16 @@ defmodule Librarian.Flusher do
 
     buckets =
       Librarian.HotStore.buckets()
-      |> then(fn bs -> if prefix, do: Enum.filter(bs, &String.starts_with?(&1, prefix)), else: bs end)
+      |> then(fn bs ->
+        if prefix, do: Enum.filter(bs, &String.starts_with?(&1, prefix)), else: bs
+      end)
 
     if max_concurrency > 1 do
       buckets
-      |> Task.async_stream(&flush_bucket(&1, opts), max_concurrency: max_concurrency, timeout: 60_000)
+      |> Task.async_stream(&flush_bucket(&1, opts),
+        max_concurrency: max_concurrency,
+        timeout: 60_000
+      )
       |> Enum.map(fn {bucket, result} -> {bucket, result} end)
     else
       buckets
@@ -202,6 +226,7 @@ defmodule Librarian.Flusher do
 
       # Also log to relationships table for audit trail
       user_id = extract_user_id_from_memory_id(old_id)
+
       Librarian.ColdStore.log_relationship(
         to_string(old_id),
         to_string(new_id),
@@ -240,6 +265,7 @@ defmodule Librarian.Flusher do
 
       # Also log to relationships table
       user_id = extract_user_id_from_memory_id(conn["id_a"])
+
       Librarian.ColdStore.log_relationship(
         conn["id_a"],
         conn["id_b"],

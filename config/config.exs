@@ -1,32 +1,32 @@
 import Config
 
 config :librarian,
-   start_ws_server: Mix.env() != :test,
-   ws_port: 4001,
-   embedding_dimensions: 1024,
-   decay_policies: %{
-     "project" => :supersede,
-     "research" => :supersede,
-     "finance" => :supersede
-   },
-   default_decay_policy: :decay,
-   db_dir: "priv/data",
-   sqlite_vec_path: "/usr/lib/sqlite-vec/vec0.so",
-   ingest: [
-     chunk_size: 350,
-     chunk_overlap: 50,
-     large_text_threshold: 1500
-   ],
-   parallel_flush_max_concurrency: 1,
-    max_buckets_per_user: 30,
-    system_buckets: ["inbox"],
-    # File storage backend: :local (default) or :r2
-    file_store: [backend: :local, max_upload_size: 10_000_000],
-    # DashScope (Qwen) configuration
-    dashscope: [
-      text_model: "qwen3.7-max-preview",
-      vision_model: "qwen-vl-max"
-    ]
+  start_ws_server: Mix.env() != :test,
+  ws_port: 4001,
+  embedding_dimensions: 1024,
+  decay_policies: %{
+    "project" => :supersede,
+    "research" => :supersede,
+    "finance" => :supersede
+  },
+  default_decay_policy: :decay,
+  db_dir: "priv/data",
+  sqlite_vec_path: "/usr/lib/sqlite-vec/vec0.so",
+  ingest: [
+    chunk_size: 350,
+    chunk_overlap: 50,
+    large_text_threshold: 1500
+  ],
+  parallel_flush_max_concurrency: 1,
+  max_buckets_per_user: 30,
+  system_buckets: ["inbox"],
+  # File storage backend: :local (default) or :r2
+  file_store: [backend: :local, max_upload_size: 10_000_000],
+  # DashScope (Qwen) configuration
+  dashscope: [
+    text_model: "qwen3.7-max-preview",
+    vision_model: "qwen-vl-max"
+  ]
 
 # Ecto repo
 config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.db"
@@ -34,8 +34,7 @@ config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.d
 config :librarian, ecto_repos: [Librarian.Repo, Librarian.PublicRepo]
 
 # PublicRepo uses a separate migrations path to avoid conflict with SQLite repo
-config :librarian, Librarian.PublicRepo,
-  migrations_path: "priv/public_repo/migrations"
+config :librarian, Librarian.PublicRepo, migrations_path: "priv/public_repo/migrations"
 
 # Phoenix endpoint
 config :librarian, LibrarianWeb.Endpoint,

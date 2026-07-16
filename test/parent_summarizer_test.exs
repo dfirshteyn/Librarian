@@ -18,7 +18,11 @@ defmodule Librarian.ParentSummarizerTest do
       # from ParentSummarizer) so they don't pollute other tests.
       conn = Librarian.ColdStore.ConnectionManager.get_conn("local")
 
-      Exqlite.query(conn, "DELETE FROM memory_relationships WHERE source_id = '101' OR target_id = '101' OR source_id = '102' OR target_id = '102'", [])
+      Exqlite.query(
+        conn,
+        "DELETE FROM memory_relationships WHERE source_id = '101' OR target_id = '101' OR source_id = '102' OR target_id = '102'",
+        []
+      )
 
       # Delete the isolated test insights file so mix test never writes
       # into the dev priv/cold/insights.jsonl.
@@ -69,7 +73,8 @@ defmodule Librarian.ParentSummarizerTest do
       :ets.insert(:warm_memories, {102, chunk2})
 
       # Call synthesize_parent
-      {:ok, parent_memory} = ParentSummarizer.synthesize_parent(correlation_id, [101, 102], "local")
+      {:ok, parent_memory} =
+        ParentSummarizer.synthesize_parent(correlation_id, [101, 102], "local")
 
       # Verify parent memory was created
       assert parent_memory.id != nil

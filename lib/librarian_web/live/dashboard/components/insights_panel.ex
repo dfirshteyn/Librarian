@@ -3,7 +3,7 @@ defmodule LibrarianWeb.Dashboard.Components.InsightsPanel do
 
   import LibrarianWeb.Dashboard.Components.Helpers
 
-  attr :insights, :list, required: true
+  attr(:insights, :list, required: true)
 
   def insights_panel(assigns) do
     ~H"""

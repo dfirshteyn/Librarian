@@ -48,7 +48,10 @@ defmodule Librarian.ParentSummarizer do
       case result do
         {:error, reason} ->
           require Logger
-          Logger.warning("[ParentSummarizer] Synthesis failed for correlation_id=#{correlation_id}: #{inspect(reason)}")
+
+          Logger.warning(
+            "[ParentSummarizer] Synthesis failed for correlation_id=#{correlation_id}: #{inspect(reason)}"
+          )
 
           Librarian.ColdStore.log_insight(%{
             "kind" => "parent_synthesis_failed",
@@ -119,11 +122,28 @@ defmodule Librarian.ParentSummarizer do
       case result do
         {:ok, curated_result} ->
           # 6. Normalize bucket and create WARM memory
-          normalized = Librarian.Router.normalize_bucket(curated_result.bucket || "inbox", user_id)
+          normalized =
+            Librarian.Router.normalize_bucket(curated_result.bucket || "inbox", user_id)
+
           warm_bucket = "#{user_id}:#{normalized}"
 
-          # Store in WARM with the correlation_id pointing to itself (self-referential)
-          parent_memory = Librarian.WarmStore.put(warm_bucket, curated_result, correlation_id: correlation_id)
+          # Store in WARM with the correlation_id pointing to itself (self-referential).
+          # Link the original chunk sources (joined) so the synthesized parent can
+          # disclose its underlying raw segments on drill-down.
+          combined_raw =
+            valid_memories
+            |> Enum.map(& &1.raw_original)
+            |> Enum.reject(&is_nil/1)
+            |> case do
+              [] -> nil
+              texts -> Enum.join(texts, "\n---\n")
+            end
+
+          parent_memory =
+            Librarian.WarmStore.put(warm_bucket, curated_result,
+              correlation_id: correlation_id,
+              raw_original: combined_raw
+            )
 
           # 7. Create chunk_of edges from each chunk to parent
           Enum.each(chunk_ids, fn chunk_id ->
@@ -160,6 +180,7 @@ defmodule Librarian.ParentSummarizer do
     |> Enum.map(fn m ->
       summary_part = m.summary || ""
       facts_part = Enum.join(m.facts || [], ". ")
+
       """
       Summary: #{summary_part}
       Facts: #{facts_part}

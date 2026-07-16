@@ -40,7 +40,8 @@ defmodule Librarian.ChunkTrackerTest do
 
       # Report chunk 1 twice (idempotency test)
       :ok = ChunkTracker.chunk_flushed(correlation_id, 1)
-      :ok = ChunkTracker.chunk_flushed(correlation_id, 1)  # Duplicate - returns :ok but doesn't count
+      # Duplicate - returns :ok but doesn't count
+      :ok = ChunkTracker.chunk_flushed(correlation_id, 1)
 
       # Still need chunk 2 to trigger completion (now we have 2 unique chunks)
       {:complete, ^correlation_id} = ChunkTracker.chunk_flushed(correlation_id, 2)

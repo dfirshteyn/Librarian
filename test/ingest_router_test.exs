@@ -13,14 +13,15 @@ defmodule Librarian.IngestRouterTest do
       chunks = Chunker.split_document(text, chunk_size: 100, overlap: 20)
 
       assert length(chunks) > 1
+
       assert Enum.all?(chunks, fn chunk ->
-        is_map(chunk) and
-        Map.has_key?(chunk, :text) and
-        Map.has_key?(chunk, :metadata) and
-        Map.has_key?(chunk.metadata, :chunk_index) and
-        Map.has_key?(chunk.metadata, :total_chunks) and
-        Map.has_key?(chunk.metadata, :correlation_id)
-      end)
+               is_map(chunk) and
+                 Map.has_key?(chunk, :text) and
+                 Map.has_key?(chunk, :metadata) and
+                 Map.has_key?(chunk.metadata, :chunk_index) and
+                 Map.has_key?(chunk.metadata, :total_chunks) and
+                 Map.has_key?(chunk.metadata, :correlation_id)
+             end)
     end
 
     test "returns single chunk for small text" do
@@ -36,7 +37,7 @@ defmodule Librarian.IngestRouterTest do
 
       chunks = Chunker.split_document(text, chunk_size: 100)
 
-      indices = Enum.map(chunks, &(&1.metadata.chunk_index))
+      indices = Enum.map(chunks, & &1.metadata.chunk_index)
       assert indices == Enum.to_list(0..(length(chunks) - 1))
     end
 
@@ -45,7 +46,7 @@ defmodule Librarian.IngestRouterTest do
 
       chunks = Chunker.split_document(text, chunk_size: 100, correlation_id: "test_corr_123")
 
-      correlation_ids = Enum.map(chunks, &(&1.metadata.correlation_id))
+      correlation_ids = Enum.map(chunks, & &1.metadata.correlation_id)
       assert Enum.uniq(correlation_ids) == ["test_corr_123"]
     end
   end
@@ -95,7 +96,10 @@ defmodule Librarian.IngestRouterTest do
 
   describe "Librarian.IngestRouter" do
     test "processes small text without chunking" do
-      params = %{"source" => "test_#{:erlang.unique_integer([:positive])}", "raw_text" => "small text"}
+      params = %{
+        "source" => "test_#{:erlang.unique_integer([:positive])}",
+        "raw_text" => "small text"
+      }
 
       assert {:ok, bucket} = IngestRouter.process(params)
       # Ingest namespaces to inbox; the curator decides the real bucket later.
@@ -104,9 +108,15 @@ defmodule Librarian.IngestRouterTest do
 
     test "chunks large text automatically" do
       # Create text larger than 1500 character threshold, each sentence unique
-      large_text = 1..200 |> Enum.map(&"This is sentence number #{&1} that will be repeated many times. ") |> Enum.join()
+      large_text =
+        1..200
+        |> Enum.map(&"This is sentence number #{&1} that will be repeated many times. ")
+        |> Enum.join()
 
-      params = %{"source" => "test_#{:erlang.unique_integer([:positive])}", "raw_text" => large_text}
+      params = %{
+        "source" => "test_#{:erlang.unique_integer([:positive])}",
+        "raw_text" => large_text
+      }
 
       assert {:ok, _bucket, chunk_count} = IngestRouter.process(params)
       assert chunk_count > 1
@@ -115,16 +125,28 @@ defmodule Librarian.IngestRouterTest do
     test "preserves hint_tags in chunked output" do
       large_text = String.duplicate("This is a sentence. ", 300)
 
-      params = %{"source" => "test_#{:erlang.unique_integer([:positive])}", "raw_text" => large_text, "hint_tags" => ["custom_tag"]}
+      params = %{
+        "source" => "test_#{:erlang.unique_integer([:positive])}",
+        "raw_text" => large_text,
+        "hint_tags" => ["custom_tag"]
+      }
 
       assert {:ok, _bucket, _chunk_count} = IngestRouter.process(params)
     end
 
     test "routes by file extension for code files" do
       # Create a larger code file to trigger chunking (with keywords for project bucket)
-      code_text = String.duplicate("defmodule MyModule do\n  def my_function do\n    IO.puts(\"hello\")\n  end\nend\nDeploy the project to production.\n", 100)
+      code_text =
+        String.duplicate(
+          "defmodule MyModule do\n  def my_function do\n    IO.puts(\"hello\")\n  end\nend\nDeploy the project to production.\n",
+          100
+        )
 
-      params = %{"source" => "test_#{:erlang.unique_integer([:positive])}", "raw_text" => code_text, "original_filename" => "my_module.ex"}
+      params = %{
+        "source" => "test_#{:erlang.unique_integer([:positive])}",
+        "raw_text" => code_text,
+        "original_filename" => "my_module.ex"
+      }
 
       assert {:ok, _bucket, _chunk_count} = IngestRouter.process(params)
     end
@@ -150,7 +172,7 @@ defmodule Librarian.IngestRouterTest do
       assert Enum.all?(test_items, &(&1.parent_id != nil))
 
       # Check that chunk_index values exist and are valid
-      chunk_indices = Enum.map(test_items, &(&1.chunk_index))
+      chunk_indices = Enum.map(test_items, & &1.chunk_index)
       assert Enum.all?(chunk_indices, &(&1 != nil))
     end
 

@@ -68,6 +68,13 @@ defmodule Librarian.Curator.Bumblebee do
     end
   end
 
+  # ── Describe image (not supported by Bumblebee) ───────────────────────
+
+  @impl true
+  def describe_image(_image_data, _opts) do
+    {:error, :vision_not_supported}
+  end
+
   # ── Embed (all-MiniLM-L6-v2) ────────────────────────────────────────
 
   @impl true

@@ -23,10 +23,11 @@ defmodule Librarian.Consolidator do
     - `{:complete, final_count}` — survivors after all passes
   """
   def consolidate(user_id, opts \\ []) when is_binary(user_id) do
-    memories = Librarian.WarmStore.all_for_user(user_id)
-    # Hard-lock guard: never consolidate a memory currently delegated /
-    # published through the Council pipeline (mid-flight or immutable).
-    |> Enum.reject(& &1.locked)
+    memories =
+      Librarian.WarmStore.all_for_user(user_id)
+      # Hard-lock guard: never consolidate a memory currently delegated /
+      # published through the Council pipeline (mid-flight or immutable).
+      |> Enum.reject(& &1.locked)
 
     if length(memories) < 2 do
       Phoenix.PubSub.broadcast(
@@ -151,14 +152,16 @@ defmodule Librarian.Consolidator do
                   to_string(m.id),
                   "merged_into",
                   user_id,
-                  %{similarity: sim, preview_merged: String.slice(neighbor_mem.summary || "", 0, 60)}
+                  %{
+                    similarity: sim,
+                    preview_merged: String.slice(neighbor_mem.summary || "", 0, 60)
+                  }
                 )
 
                 Phoenix.PubSub.broadcast(
                   Librarian.PubSub,
                   "consolidation:#{user_id}",
-                  {:merged, neighbor_id, m.id, sim,
-                   String.slice(m.summary || "", 0, 60),
+                  {:merged, neighbor_id, m.id, sim, String.slice(m.summary || "", 0, 60),
                    String.slice(neighbor_mem.summary || "", 0, 60)}
                 )
               else
@@ -318,6 +321,7 @@ defmodule Librarian.Consolidator do
             # Log each superseded memory as a relationship
             Enum.each(all_originals, fn orig_id ->
               Librarian.WarmStore.supersede(orig_id, saved.id)
+
               Librarian.ColdStore.log_relationship(
                 to_string(orig_id),
                 to_string(saved.id),

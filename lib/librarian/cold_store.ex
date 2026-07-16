@@ -87,13 +87,21 @@ defmodule Librarian.ColdStore do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
 
     outgoing =
-      case Exqlite.query(conn, "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC", [memory_id]) do
+      case Exqlite.query(
+             conn,
+             "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC",
+             [memory_id]
+           ) do
         {:ok, %{rows: rows}} -> rows_to_relationships(rows)
         _ -> []
       end
 
     incoming =
-      case Exqlite.query(conn, "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC", [memory_id]) do
+      case Exqlite.query(
+             conn,
+             "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC",
+             [memory_id]
+           ) do
         {:ok, %{rows: rows}} -> rows_to_relationships(rows)
         _ -> []
       end
@@ -216,7 +224,12 @@ defmodule Librarian.ColdStore do
 
     result.rows
     |> Enum.map(fn [name, display_name, created_at, deleted_at] ->
-      %{name: name, display_name: display_name || name, created_at: created_at, deleted_at: deleted_at}
+      %{
+        name: name,
+        display_name: display_name || name,
+        created_at: created_at,
+        deleted_at: deleted_at
+      }
     end)
   end
 
@@ -266,7 +279,8 @@ defmodule Librarian.ColdStore do
   Rename a bucket. Returns `{:ok, new_name}` or `{:error, reason}`.
   Preserves relationship graph edges by updating the bucket field on all memories.
   """
-  def rename_bucket(user_id, old_name, new_name) when is_binary(user_id) and is_binary(old_name) and is_binary(new_name) do
+  def rename_bucket(user_id, old_name, new_name)
+      when is_binary(user_id) and is_binary(old_name) and is_binary(new_name) do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
     seed_default_buckets(conn)
 
@@ -437,8 +451,8 @@ defmodule Librarian.ColdStore do
       Exqlite.query(
         conn,
         """
-        INSERT INTO memories (bucket, summary, facts, tags, importance, embedding, created_at, last_accessed_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        INSERT INTO memories (bucket, summary, facts, tags, importance, embedding, created_at, last_accessed_at, original_content)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         """,
         [
           memory.bucket,
@@ -448,7 +462,8 @@ defmodule Librarian.ColdStore do
           memory.importance || 0.0,
           embedding_blob,
           created_at,
-          now
+          now,
+          memory.raw_original
         ]
       )
 
@@ -518,7 +533,7 @@ defmodule Librarian.ColdStore do
                 conn,
                 """
                 SELECT id, bucket, summary, facts, tags, importance,
-                       created_at, last_accessed_at, superseded_by, embedding
+                       created_at, last_accessed_at, superseded_by, embedding, original_content
                 FROM memories
                 WHERE embedding IS NOT NULL
                 """,
@@ -644,7 +659,7 @@ defmodule Librarian.ColdStore do
                     conn,
                     """
                     SELECT id, bucket, summary, facts, tags, importance,
-                           created_at, last_accessed_at, superseded_by, embedding
+                           created_at, last_accessed_at, superseded_by, embedding, original_content
                     FROM memories WHERE embedding IS NOT NULL
                     """,
                     []
@@ -762,7 +777,8 @@ defmodule Librarian.ColdStore do
          created_at,
          last_accessed_at,
          superseded_by,
-         embedding_blob
+         embedding_blob,
+         original_content
        ]) do
     %{
       id: id,
@@ -774,7 +790,8 @@ defmodule Librarian.ColdStore do
       created_at: created_at,
       last_accessed_at: last_accessed_at,
       superseded_by: superseded_by,
-      embedding: unpack_embedding(embedding_blob)
+      embedding: unpack_embedding(embedding_blob),
+      original_content: original_content
     }
   end
 

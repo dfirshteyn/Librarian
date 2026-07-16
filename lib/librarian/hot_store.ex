@@ -76,6 +76,7 @@ defmodule Librarian.HotStore do
 
       _ ->
         ensure_started(new_bucket)
+
         Enum.each(payloads, fn payload ->
           Librarian.Wal.append(new_bucket, payload)
           GenServer.cast(via(new_bucket), {:put, payload})
@@ -188,7 +189,11 @@ defmodule Librarian.HotStore do
   end
 
   @impl true
-  def handle_call({:put_unless_duplicate, payload}, _from, %{bucket: bucket, table: table, seq: seq} = state) do
+  def handle_call(
+        {:put_unless_duplicate, payload},
+        _from,
+        %{bucket: bucket, table: table, seq: seq} = state
+      ) do
     if exists_raw_text?(table, payload.raw_text) do
       {:reply, {:ok, :duplicate}, state}
     else

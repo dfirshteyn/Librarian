@@ -1,10 +1,10 @@
 defmodule LibrarianWeb.Dashboard.Components.Header do
   use Phoenix.Component
 
-  attr :token_savings, :map, required: true
-  attr :flush_concurrency, :integer, required: true
-  attr :demo_running, :boolean, required: true
-  attr :demo_total, :integer, required: true
+  attr(:token_savings, :map, required: true)
+  attr(:flush_concurrency, :integer, required: true)
+  attr(:demo_running, :boolean, required: true)
+  attr(:demo_total, :integer, required: true)
 
   def header(assigns) do
     ~H"""

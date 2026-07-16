@@ -14,7 +14,11 @@ defmodule Librarian.Council.Persona do
   @doc """
   Returns the display configuration, temperature tweak, and system prompt for a persona.
   """
-  @spec config(persona_type()) :: %{name: String.t(), temperature: float(), system_prompt: String.t()}
+  @spec config(persona_type()) :: %{
+          name: String.t(),
+          temperature: float(),
+          system_prompt: String.t()
+        }
   def config(:skeptic) do
     %{
       name: "The Skeptic",
@@ -72,6 +76,7 @@ defmodule Librarian.Council.Persona do
   @spec compile_messages(persona_type(), String.t()) :: [map()]
   def compile_messages(persona, content) do
     cfg = config(persona)
+
     [
       %{"role" => "system", "content" => cfg.system_prompt},
       %{"role" => "user", "content" => "Analyze the following context block:\n\n#{content}"}
