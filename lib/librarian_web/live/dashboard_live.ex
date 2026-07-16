@@ -654,6 +654,56 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, put_flash(socket, :error, "Text required")}
   end
 
+  def handle_event("file_upload", params, socket) do
+    tid = socket.assigns.tenant_id
+
+    case params["file"] do
+      %Plug.Upload{} = upload ->
+        file_content = File.read!(upload.path)
+        mime_type = Librarian.Utils.FileDetector.mime_type(upload.filename)
+
+        # Base64-encode binary files, keep text as-is
+        {raw_text, file_data} =
+          if String.starts_with?(mime_type, "text/") or mime_type == "application/json" do
+            {file_content, nil}
+          else
+            {nil, Base.encode64(file_content)}
+          end
+
+        ingest_params = %{
+          "source" => "file_upload",
+          "raw_text" => raw_text,
+          "file_data" => file_data,
+          "original_filename" => upload.filename,
+          "file_type" => mime_type,
+          "hint_tags" => []
+        }
+
+        case Librarian.IngestRouter.process(ingest_params, tid) do
+          {:ok, bucket} ->
+            {:noreply,
+             socket
+             |> assign(:ingest_text, "")
+             |> put_flash(:info, "File uploaded to \#{bucket}")}
+
+          {:ok, bucket, chunk_count} ->
+            {:noreply,
+             socket
+             |> assign(:ingest_text, "")
+             |> put_flash(
+               :info,
+               "File uploaded (chunked into \#{chunk_count} pieces) to \#{bucket}"
+             )}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Upload failed: \#{inspect(reason)}")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No file selected")}
+    end
+  end
+
   def handle_event("toggle_memory", %{"id" => id}, socket) do
     id = String.to_integer(id)
 

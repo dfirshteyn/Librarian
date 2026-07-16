@@ -19,6 +19,10 @@ defmodule Librarian.WarmStore.Memory do
     # Stored so progressive disclosure can pull the unedited source instantly
     # once the curated summary is vector-matched — without embedding it.
     :raw_original,
+    # File/media metadata (optional - for PDF/image uploads)
+    :file_type,
+    :stored_path,
+    :dimensions,
     published: false,
     locked: false,
     access_count: 0
@@ -338,7 +342,10 @@ defmodule Librarian.WarmStore do
           published: m.published,
           locked: m.locked,
           access_count: m.access_count,
-          raw_original: m.raw_original
+          raw_original: m.raw_original,
+          file_type: m.file_type,
+          stored_path: m.stored_path,
+          dimensions: m.dimensions
         }) <> "\n"
       end)
       |> IO.iodata_to_binary()
@@ -383,7 +390,10 @@ defmodule Librarian.WarmStore do
               published: map["published"] || false,
               locked: map["locked"] || false,
               access_count: map["access_count"] || 0,
-              raw_original: map["raw_original"]
+              raw_original: map["raw_original"],
+              file_type: map["file_type"],
+              stored_path: map["stored_path"],
+              dimensions: map["dimensions"]
             }
 
             GenServer.call(__MODULE__, {:load, memory})
@@ -452,6 +462,9 @@ defmodule Librarian.WarmStore do
       importance: result.importance,
       correlation_id: correlation_id,
       raw_original: raw_original,
+      file_type: result.file_type,
+      stored_path: result.stored_path,
+      dimensions: result.dimensions,
       created_at: now,
       last_accessed_at: now
     }

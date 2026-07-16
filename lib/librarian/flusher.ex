@@ -69,7 +69,10 @@ defmodule Librarian.Flusher do
                 memory =
                   Librarian.WarmStore.put(warm_bucket, result,
                     correlation_id: payload.parent_id,
-                    raw_original: payload.raw_text
+                    raw_original: payload.raw_text,
+                    file_type: payload.file_type,
+                    stored_path: payload.stored_path,
+                    dimensions: payload.dimensions
                   )
 
                 Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")

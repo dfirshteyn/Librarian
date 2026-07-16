@@ -196,11 +196,10 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   def memory_detail(assigns) do
     ~H"""
     <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
-      <%= if @memory.raw_extraction do %>
+      <%= if @memory.raw_original do %>
         <div>
           <span class="text-xs text-gray-400 font-bold">
-            <%= file_badge(@memory.file_type) %>
-            📄 Extracted Content:
+            📄 Raw Original:
           </span>
           <%= if @memory.stored_path do %>
             <span class="text-[10px] text-gray-600 ml-1">[<%= shorten_path(@memory.stored_path) %>]</span>
@@ -209,7 +208,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
             <span class="text-[10px] text-gray-500 ml-1"><%= @memory.dimensions %></span>
           <% end %>
           <div class="mt-1 prose prose-invert prose-xs max-w-none text-xs text-gray-300 bg-gray-900 rounded p-2 overflow-x-auto">
-            <%= render_markdown(@memory.raw_extraction) %>
+            <%= render_markdown(@memory.raw_original) %>
           </div>
         </div>
         <div class="border-t border-gray-700/50" />
@@ -255,8 +254,16 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   attr(:tenant_id, :string, required: true)
 
   def lineage_detail(assigns) do
+    # Wrap ColdStore access in try/rescue to prevent UI crashes when DB unavailable
     lineage =
-      Librarian.ColdStore.get_memory_lineage(to_string(assigns.memory.id), assigns.tenant_id)
+      try do
+        Librarian.ColdStore.get_memory_lineage(to_string(assigns.memory.id), assigns.tenant_id)
+      rescue
+        e ->
+          require Logger
+          Logger.warning("Lineage lookup failed for memory #{assigns.memory.id}: #{inspect(e)}")
+          %{outgoing: [], incoming: []}
+      end
 
     assigns = assign(assigns, :lineage, lineage)
 
