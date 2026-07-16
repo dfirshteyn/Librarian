@@ -21,6 +21,57 @@ defmodule Librarian.Curator.QwenApi do
   @model "qwen3.7-max-preview"
 
   @impl true
+  def describe_image(image_data, opts \\ []) do
+    prompt = Keyword.get(opts, :prompt, "Describe this image in detail, including any text, objects, people, and the overall scene.")
+    model = vision_model()
+
+    api_key =
+      Application.get_env(:librarian, :dashscope_api_key) ||
+        raise "DASHSCOPE_API_KEY not set — export it or add to runtime.exs"
+
+    # Base64-encode if raw binary
+    b64_data =
+      case image_data do
+        "data:image" <> _ -> image_data
+        _ -> "data:image/png;base64,#{Base.encode64(image_data)}"
+      end
+
+    messages = [
+      %{
+        "role" => "user",
+        "content" => [
+          %{"type" => "image_url", "image_url" => %{"url" => b64_data}},
+          %{"type" => "text", "text" => prompt}
+        ]
+      }
+    ]
+
+    body = %{
+      "model" => model,
+      "messages" => messages
+    }
+
+    case Req.post(req(),
+           url: "#{@base_url}/chat/completions",
+           json: body,
+           headers: [{"authorization", "Bearer #{api_key}"}],
+           receive_timeout: 30_000
+         ) do
+      {:ok, %{status: 200, body: resp_body}} ->
+        case get_in(resp_body, ["choices", Access.at(0), "message", "content"]) do
+          content when is_binary(content) -> {:ok, content}
+          nil -> {:error, :missing_content}
+        end
+
+      {:ok, %{status: status, body: resp_body}} ->
+        {:error, {:api_error, status, resp_body}}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  @impl true
   @spec summarize(maybe_improper_list()) :: {:error, any()} | {:ok, Librarian.Curator.Result.t()}
   def summarize(chunk) when is_list(chunk) do
     text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
@@ -137,6 +188,12 @@ defmodule Librarian.Curator.QwenApi do
       {:error, reason} ->
         {:error, {:http_error, reason}}
     end
+  end
+
+  # Returns the configured vision model, defaulting to "qwen-vl-max"
+  defp vision_model do
+    Application.get_env(:librarian, :dashscope, [])
+    |> Keyword.get(:vision_model, "qwen-vl-max")
   end
 
   # Returns either a Req struct (test: pre-built with a plug adapter)

@@ -47,4 +47,33 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
   def relationship_badge("cross_connected"), do: "🌙 Cross-Connect"
   def relationship_badge("derived_from"), do: "🌙 Derived"
   def relationship_badge(_type), do: "🔗 Link"
+
+  @doc """
+  Render markdown to safe HTML using MDEx.
+  Used to display extracted PDF content and vision model descriptions
+  as formatted HTML in the dashboard.
+  """
+  def render_markdown(md) when is_binary(md) and md != "" do
+    {:safe, MDEx.to_html!(md, render: %{hardbreaks: true})}
+  rescue
+    _ -> {:safe, md}
+  end
+
+  def render_markdown(_), do: {:safe, ""}
+
+  @doc """
+  Human-readable file type badge for media attachments.
+  """
+  def file_badge(nil), do: ""
+  def file_badge(mime) when is_binary(mime) do
+    cond do
+      String.starts_with?(mime, "image/") -> "📷 Image"
+      mime == "application/pdf" -> "📄 PDF"
+      true -> "📎 #{mime}"
+    end
+  end
+
+  @doc "Shorten a stored_path for display."
+  def shorten_path(nil), do: ""
+  def shorten_path(path), do: String.slice(path, -30, 30) |> String.replace_prefix("", "…")
 end

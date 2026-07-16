@@ -483,6 +483,76 @@ defmodule LibrarianWeb.ApiController do
     end
   end
 
+  @doc """
+  POST /api/ingest/file
+  Multipart file upload endpoint. Accepts a file in the `file` field.
+  Optional: X-User-Id header, source, hint_tags, metadata fields.
+
+  Returns:
+    - For images: {ok, stored_path, dimensions, description, bucket}
+    - For PDFs: {ok, stored_path, markdown_preview, bucket}
+    - For text/code: same as /api/ingest
+  """
+  def ingest_file(conn, params) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case conn.params["file"] do
+        %Plug.Upload{} = upload ->
+          file_content = File.read!(upload.path)
+          mime_type = Librarian.Utils.FileDetector.mime_type(upload.filename)
+
+          # Base64-encode the file data for transport
+          b64_data = Base.encode64(file_content)
+
+          # Build params for IngestRouter
+          ingest_params =
+            params
+            |> Map.put("file_data", b64_data)
+            |> Map.put("original_filename", upload.filename)
+            |> Map.put("file_type", mime_type)
+            |> Map.put("source", params["source"] || "file_upload")
+
+          case Librarian.IngestRouter.process(ingest_params, user_id) do
+            {:ok, bucket} ->
+              json(conn, %{
+                ok: true,
+                bucket: bucket,
+                user_id: user_id,
+                file: upload.filename,
+                mime: mime_type
+              })
+
+            {:ok, bucket, chunk_count} ->
+              json(conn, %{
+                ok: true,
+                bucket: bucket,
+                user_id: user_id,
+                file: upload.filename,
+                mime: mime_type,
+                chunk_count: chunk_count,
+                note: "Document auto-chunked into #{chunk_count} pieces"
+              })
+
+            {:error, reason} ->
+              conn
+              |> put_status(422)
+              |> json(%{ok: false, error: inspect(reason)})
+          end
+
+        _ ->
+          conn
+          |> put_status(400)
+          |> json(%{ok: false, error: "missing file field — upload a file with field name 'file'"})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
   # Multipart file handling
 
   defp has_multipart?(conn) do
@@ -494,24 +564,31 @@ defmodule LibrarianWeb.ApiController do
   end
 
   defp extract_file_from_multipart(conn, params) do
-    # For now, just add the file info to params
-    # Full multipart parsing would require Plug.Parsers config
-    # This is a simplified version that works with pre-parsed multipart data
+    # Extract file from multipart upload and prepare for IngestRouter
     case conn.params["file"] do
       %Plug.Upload{} = upload ->
         file_content = File.read!(upload.path)
+        mime_type = Librarian.Utils.FileDetector.mime_type(upload.filename)
 
-        # Add file info to params
+        # Base64-encode binary files, keep text as-is
+        {raw_text, file_data} =
+          if String.starts_with?(mime_type, "text/") or mime_type == "application/json" do
+            {file_content, nil}
+          else
+            # For images, PDFs, etc. — put base64 in file_data, leave raw_text for description
+            {nil, Base.encode64(file_content)}
+          end
+
         params
-        |> Map.put("raw_text", file_content)
+        |> Map.put("raw_text", raw_text)
+        |> Map.put("file_data", file_data)
         |> Map.put("original_filename", upload.filename)
-        |> Map.put("file_type", Librarian.Utils.FileDetector.mime_type(upload.filename))
+        |> Map.put("file_type", mime_type)
 
       _ ->
         params
     end
   after
-    # Clean up temp file if we created one
     :ok
   end
 end

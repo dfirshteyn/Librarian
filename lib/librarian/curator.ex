@@ -50,6 +50,14 @@ defmodule Librarian.Curator do
               {:ok, Librarian.Curator.Result.t()} | {:error, term()}
   @callback embed(text :: String.t()) :: {:ok, [float()]} | {:error, term()}
 
+  @doc """
+  Describe an image using the configured curator's vision backend.
+  `image_data` is raw binary or base64-encoded image bytes.
+  Returns `{:ok, description_string}` or `{:error, reason}`.
+  """
+  @callback describe_image(image_data :: binary, opts :: Keyword.t()) ::
+              {:ok, String.t()} | {:error, term()}
+
   def summarize(chunk, curator_impl \\ nil) do
     impl = curator_impl || impl()
     scrubbed_chunk = scrub_chunk(chunk)
@@ -66,6 +74,15 @@ defmodule Librarian.Curator do
     end
 
     impl.embed(scrubbed)
+  end
+
+  @doc """
+  Describe an image using the configured curator's vision backend.
+  Delegates to the configured implementation's `describe_image/2`.
+  """
+  def describe_image(image_data, opts \\ []) do
+    impl = impl()
+    impl.describe_image(image_data, opts)
   end
 
   # Scrub each payload's raw_text before handing the chunk to any backend.

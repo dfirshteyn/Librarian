@@ -48,7 +48,13 @@ defmodule Librarian.Wal do
         "source" => scrubbed_payload.source,
         "raw_text" => scrubbed_payload.raw_text,
         "hint_tags" => scrubbed_payload.hint_tags,
-        "metadata" => scrubbed_payload.metadata
+        "metadata" => scrubbed_payload.metadata,
+        # File/media metadata — preserved across crash recovery
+        "file_type" => scrubbed_payload.file_type,
+        "original_filename" => scrubbed_payload.original_filename,
+        "stored_path" => scrubbed_payload.stored_path,
+        "dimensions" => scrubbed_payload.dimensions,
+        "raw_extraction" => scrubbed_payload.raw_extraction
       })
 
     # :append mode + sync write — we want this on disk before we touch ETS
@@ -138,7 +144,13 @@ defmodule Librarian.Wal do
       raw_text: map["raw_text"] || "",
       occurred_at: parse_dt(map["captured_at"]),
       hint_tags: map["hint_tags"] || [],
-      metadata: Map.merge(map["metadata"] || %{}, %{"wal_seq" => map["seq"], "replayed" => true})
+      metadata: Map.merge(map["metadata"] || %{}, %{"wal_seq" => map["seq"], "replayed" => true}),
+      # Restore file/media metadata on replay so crash recovery preserves them
+      file_type: map["file_type"],
+      original_filename: map["original_filename"],
+      stored_path: map["stored_path"],
+      dimensions: map["dimensions"],
+      raw_extraction: map["raw_extraction"]
     }
   end
 

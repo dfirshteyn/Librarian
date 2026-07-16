@@ -61,7 +61,13 @@ defmodule Librarian.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:glazer, "~> 0.5"}
+      {:glazer, "~> 0.5"},
+      # PDF extraction via pdftotext (poppler-utils) — already installed on system
+      # Future: swap to pdf_oxide (Rust NIF) when Rust toolchain is available
+      # Image validation + dimension extraction
+      {:ex_image_info, "~> 1.0.0"},
+      # Markdown → HTML rendering for dashboard display
+      {:mdex, "~> 0.3"}
     ]
   end
 end

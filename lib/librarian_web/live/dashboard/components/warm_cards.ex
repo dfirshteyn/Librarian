@@ -194,6 +194,24 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   def memory_detail(assigns) do
     ~H"""
     <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
+      <%= if @memory.raw_extraction do %>
+        <div>
+          <span class="text-xs text-gray-400 font-bold">
+            <%= file_badge(@memory.file_type) %>
+            📄 Extracted Content:
+          </span>
+          <%= if @memory.stored_path do %>
+            <span class="text-[10px] text-gray-600 ml-1">[<%= shorten_path(@memory.stored_path) %>]</span>
+          <% end %>
+          <%= if @memory.dimensions do %>
+            <span class="text-[10px] text-gray-500 ml-1"><%= @memory.dimensions %></span>
+          <% end %>
+          <div class="mt-1 prose prose-invert prose-xs max-w-none text-xs text-gray-300 bg-gray-900 rounded p-2 overflow-x-auto">
+            <%= render_markdown(@memory.raw_extraction) %>
+          </div>
+        </div>
+        <div class="border-t border-gray-700/50" />
+      <% end %>
       <div>
         <span class="text-xs text-gray-400">Facts:</span>
         <%= if @memory.facts && @memory.facts != [] do %>

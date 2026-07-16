@@ -3,6 +3,12 @@ defmodule Librarian.Capture.Payload do
   The one shape every capture source produces. A source knows nothing
   about buckets, tiers, embeddings, or scoring — it just hands over raw
   text plus where/when it came from.
+
+  Extended with file/media support:
+    - `stored_path` — path/URL where the original file was saved (FileStore)
+    - `dimensions` — image dimensions from ExImageInfo, e.g. "1920x1080"
+    - `raw_extraction` — vision model description (images) or markdown (PDFs)
+    - `original_data` — base64-encoded original file bytes (for transport/API calls)
   """
 
   @enforce_keys [:source, :raw_text]
@@ -15,7 +21,12 @@ defmodule Librarian.Capture.Payload do
     file_type: nil,
     original_filename: nil,
     parent_id: nil,
-    chunk_index: nil
+    chunk_index: nil,
+    # File/media support
+    stored_path: nil,
+    dimensions: nil,
+    raw_extraction: nil,
+    original_data: nil
   ]
 
   @type t :: %__MODULE__{
@@ -27,7 +38,11 @@ defmodule Librarian.Capture.Payload do
           file_type: String.t() | nil,
           original_filename: String.t() | nil,
           parent_id: String.t() | nil,
-          chunk_index: non_neg_integer() | nil
+          chunk_index: non_neg_integer() | nil,
+          stored_path: String.t() | nil,
+          dimensions: String.t() | nil,
+          raw_extraction: String.t() | nil,
+          original_data: String.t() | nil
         }
 
   @doc """
@@ -44,7 +59,11 @@ defmodule Librarian.Capture.Payload do
       file_type: map["file_type"],
       original_filename: map["original_filename"],
       parent_id: map["parent_id"],
-      chunk_index: map["chunk_index"]
+      chunk_index: map["chunk_index"],
+      stored_path: map["stored_path"],
+      dimensions: map["dimensions"],
+      raw_extraction: map["raw_extraction"],
+      original_data: map["original_data"]
     }
   end
 

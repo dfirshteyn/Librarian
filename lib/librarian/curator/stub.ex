@@ -50,6 +50,11 @@ defmodule Librarian.Curator.Stub do
   end
 
   @impl true
+  def describe_image(_image_data, _opts \\ []) do
+    {:ok, "Image description (stub) — no vision model configured"}
+  end
+
+  @impl true
   def embed(text) when is_binary(text) do
     # Deterministic bag-of-words hashing into a fixed-size vector.
     # Crude, but gives cosine similarity *something* real to chew on

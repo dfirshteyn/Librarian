@@ -18,8 +18,15 @@ config :librarian,
      large_text_threshold: 1500
    ],
    parallel_flush_max_concurrency: 1,
-   max_buckets_per_user: 30,
-   system_buckets: ["inbox"]
+    max_buckets_per_user: 30,
+    system_buckets: ["inbox"],
+    # File storage backend: :local (default) or :r2
+    file_store: [backend: :local, max_upload_size: 10_000_000],
+    # DashScope (Qwen) configuration
+    dashscope: [
+      text_model: "qwen3.7-max-preview",
+      vision_model: "qwen-vl-max"
+    ]
 
 # Ecto repo
 config :librarian, Librarian.Repo, database: "priv/data/librarian_#{Mix.env()}.db"
