@@ -94,7 +94,7 @@ defmodule Librarian.Curator.QwenApi do
     # DashScope has an embeddings endpoint but we don't need it for the
     # hackathon — Stub's hashed bag-of-words is used for local recall,
     # and Qwen is only called for the nightly deep-reasoning pass.
-    # Wire this up when you add Bumblebee or want cloud embeddings.
+    # Wire this up when you want cloud embeddings.
     {:error, :not_implemented}
   end
 

@@ -22,7 +22,7 @@ a small, mechanical change, not a rewrite:
 |---|---|
 | `Librarian.Json` (hand-rolled codec) | `Jason` |
 | `Librarian.WsServer` (raw `:gen_tcp` WebSocket) | `Plug.Cowboy.WebSocket` or `Phoenix.Socket` |
-| `Librarian.Curator.Stub` (heuristics) | `Librarian.Curator.Bumblebee`, `.LlamaCpp`, `.QwenApi` |
+| `Librarian.Curator.Stub` (heuristics) | `Librarian.Curator.LlamaCpp`, `.QwenApi` |
 
 Nothing else in the codebase talks to these directly — they're each behind
 one module boundary (`Librarian.Json`, `Librarian.Curator`, the
@@ -39,8 +39,7 @@ one module boundary (`Librarian.Json`, `Librarian.Curator`, the
                                                      Flusher.flush_bucket/1
                                                           v
                                               [Curator behaviour]
-                                          (Stub today; Bumblebee/
-                                           llama.cpp/Qwen API later)
+                                          (Stub today; llamacpp/Qwen API later)
                                                           |
                                                           v
                                                     [WARM tier]
@@ -208,7 +207,7 @@ kind of code that looks right and isn't.
 
 **Not built at all, real next steps if you keep going:**
 - Embedding-weighted recall (see above — the pieces exist, just not fused)
-- A real `Curator` backend (Bumblebee, llama.cpp, or a Qwen API call) —
+- A real `Curator` backend (llama.cpp, or a Qwen API call) —
   and a schema document (à la Karpathy's CLAUDE.md/AGENTS.md pattern)
   that a real backend reads to know what counts as a fact, when to
   create vs. supersede, what's private

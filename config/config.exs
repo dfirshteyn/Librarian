@@ -68,12 +68,6 @@ config :tailwind,
     cd: Path.expand("../assets", __DIR__)
   ]
 
-# Force Nx to use EXLA as the global default backend
-config :nx, :default_backend, EXLA.Backend
-
-# Target the host machine's CPU architecture
-config :exla, :default_client, :host
-
 if File.exists?("config/#{config_env()}.exs") do
   import_config "#{config_env()}.exs"
 end

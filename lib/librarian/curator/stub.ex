@@ -1,11 +1,11 @@
 defmodule Librarian.Curator.Stub do
   @moduledoc """
-  A zero-dependency curator backend. No ML, no network — just heuristics,
-  so the whole pipeline runs and is testable on day one without waiting
-  on Bumblebee, llama.cpp, or an API key.
+   A zero-dependency curator backend. No ML, no network — just heuristics,
+   so the whole pipeline runs and is testable on day one without waiting
+   on llama.cpp, or an API key.
 
-  Swap this out behaviour-compatibly for `Librarian.Curator.QwenApi` or
-  a Bumblebee-backed module once you want real reasoning quality. The
+   Swap this out behaviour-compatibly for `Librarian.Curator.QwenApi` or
+   a real model module once you want real reasoning quality. The
   rest of the app never has to change.
   """
 
@@ -58,7 +58,7 @@ defmodule Librarian.Curator.Stub do
   def embed(text) when is_binary(text) do
     # Deterministic bag-of-words hashing into a fixed-size vector.
     # Crude, but gives cosine similarity *something* real to chew on
-    # without pulling in a model. Swap for Bumblebee/EXLA or an API
+    # without pulling in a model. Swap for a real API
     # embedding call later via the same callback.
     vector = List.duplicate(0.0, @embedding_dim)
 

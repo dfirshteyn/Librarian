@@ -47,10 +47,6 @@ defmodule Librarian.MixProject do
       # Postgres for public graph network
       {:postgrex, "~> 0.19"},
       {:pgvector, "~> 0.3"},
-      # ML
-      {:nx, "~> 0.12.0"},
-      {:exla, "~> 0.12.0"},
-      {:bumblebee, "~> 0.7.0"},
       # Assets
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},

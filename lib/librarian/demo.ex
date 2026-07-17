@@ -79,7 +79,7 @@ defmodule Librarian.Demo do
     "the MVP milestone is 100 concurrent users with sub-100ms recall latency on a single node",
     "the integration with Claude Code and VS Code extensions is planned for Q3 release",
     "the unit economics: $0.002 per memory per month, 95% gross margin at 10M memories",
-    "the demo script walks through: flood ingest, multi-tenant isolation, nightly deep pass",
+    "the demo script walks through: Multi-agent simulation, multi-tenant isolation, nightly deep pass",
     "the load balancer handles 50k concurrent connections with 10ms p99 latency",
     "the auto-scaling policy spawns a new node within 45 seconds when CPU hits 75%",
     "the CDN cache hit rate is 87% for static assets, reducing origin load by 6x",

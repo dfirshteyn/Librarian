@@ -30,20 +30,19 @@ end
 
 defmodule Librarian.Curator do
   @moduledoc """
-  The pluggable "model" boundary. This is the single seam where you swap:
+   The pluggable "model" boundary. This is the single seam where you swap:
 
-    - `Librarian.Curator.Stub`      — zero-dependency heuristic curator (default, runs anywhere)
-    - `Librarian.Curator.LlamaCpp`  — shells out to a local llama.cpp / Ollama server
-    - `Librarian.Curator.QwenApi`   — hits Qwen's API for the nightly curation pass
-    - `Librarian.Curator.Bumblebee` — in-BEAM embeddings via Bumblebee/EXLA
+     - `Librarian.Curator.Stub`      — zero-dependency heuristic curator (default, runs anywhere)
+     - `Librarian.Curator.LlamaCpp`  — shells out to a local llama.cpp / Ollama server
+     - `Librarian.Curator.QwenApi`   — hits Qwen's API for the nightly curation pass
 
-  Nothing else in the app should know which backend is active. Pick the
-  backend via config:
+   Nothing else in the app should know which backend is active. Pick the
+   backend via config:
 
-      config :librarian, curator: Librarian.Curator.Stub
+       config :librarian, curator: Librarian.Curator.Stub
 
-  and call `Librarian.Curator.summarize/1` / `embed/1`, which dispatch to
-  whichever module is configured.
+   and call `Librarian.Curator.summarize/1` / `embed/1`, which dispatch to
+   whichever module is configured.
   """
 
   @callback summarize(chunk :: [Librarian.Capture.Payload.t()]) ::

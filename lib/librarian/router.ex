@@ -21,9 +21,9 @@ defmodule Librarian.Router do
     {"project", ~w(project repo codebase deploy deployment elixir genserver
                     bug refactor feature shipped pullrequest wal daemon
                     leakguard hotstore warmstore flusher websocket extension)},
-    {"research", ~w(paper research study benchmark architecture comparison
-                     survey arxiv ebbinghaus spaced retrieval transformer
-                     embedding cosine vector rag beam bumblebee llama)},
+     {"research", ~w(paper research study benchmark architecture comparison
+                      survey arxiv ebbinghaus spaced retrieval transformer
+                      embedding cosine vector rag beam llama)},
     {"ideas", ~w(idea brainstorm concept hackathon what if could)},
     {"thoughts", ~w(feeling thinking wonder wondering honestly)},
     {"finance", ~w(invoice billing payment subscription budget finance

@@ -12,8 +12,6 @@ defmodule LibrarianWeb.DashboardLive do
   alias Librarian.{WarmStore, HotStore, Flusher}
   require Logger
 
-  # ── Swarm / Flood demo texts are now located in Librarian.Demo ──
-
   @impl true
   def mount(_params, session, socket) do
     # Identity comes from the signed, server-verified claim persisted in the
