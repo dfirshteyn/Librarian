@@ -69,7 +69,10 @@ defmodule Librarian.WarmStore do
   def put(bucket, %Librarian.Curator.Result{} = result, opts \\ []) do
     correlation_id = Keyword.get(opts, :correlation_id)
     raw_original = Keyword.get(opts, :raw_original)
-    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id, raw_original})
+    file_type = Keyword.get(opts, :file_type)
+    stored_path = Keyword.get(opts, :stored_path)
+    dimensions = Keyword.get(opts, :dimensions)
+    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id, raw_original, file_type, stored_path, dimensions})
   end
 
   def get(id) do
@@ -446,7 +449,7 @@ defmodule Librarian.WarmStore do
 
   @impl true
   def handle_call(
-        {:put, bucket, result, correlation_id, raw_original},
+        {:put, bucket, result, correlation_id, raw_original, file_type, stored_path, dimensions},
         _from,
         %{table: table, next_id: id} = state
       ) do
@@ -462,9 +465,9 @@ defmodule Librarian.WarmStore do
       importance: result.importance,
       correlation_id: correlation_id,
       raw_original: raw_original,
-      file_type: result.file_type,
-      stored_path: result.stored_path,
-      dimensions: result.dimensions,
+      file_type: file_type,
+      stored_path: stored_path,
+      dimensions: dimensions,
       created_at: now,
       last_accessed_at: now
     }
