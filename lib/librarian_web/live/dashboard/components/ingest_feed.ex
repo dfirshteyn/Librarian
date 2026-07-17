@@ -55,7 +55,7 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
 
       <div class="flex-1 overflow-y-auto space-y-2" id="feed" phx-update="stream" style="max-height: 400px;">
         <div :if={@feed_empty} id="feed-empty" class="text-gray-600 text-xs">
-          Waiting for ingest events... run Flood Demo or Swarm Demo.
+          Waiting for ingest events... use the text box above or run Seed Demo.
         </div>
         <%= for {dom_id, entry} <- @streams.feed do %>
           <div id={dom_id} class="border-l-2 border-gray-700 pl-3 py-1">

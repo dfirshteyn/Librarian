@@ -23,11 +23,23 @@ defmodule Librarian.Consolidator do
     - `{:complete, final_count}` — survivors after all passes
   """
   def consolidate(user_id, opts \\ []) when is_binary(user_id) do
+    bucket_filter = Keyword.get(opts, :bucket_filter)
+
     memories =
       Librarian.WarmStore.all_for_user(user_id)
       # Hard-lock guard: never consolidate a memory currently delegated /
       # published through the Council pipeline (mid-flight or immutable).
       |> Enum.reject(& &1.locked)
+      # Optional: scope to a single named bucket lane (e.g. "project")
+      |> then(fn mems ->
+        if bucket_filter do
+          Enum.filter(mems, fn m ->
+            (m.bucket |> String.split(":") |> List.last()) == bucket_filter
+          end)
+        else
+          mems
+        end
+      end)
 
     if length(memories) < 2 do
       Phoenix.PubSub.broadcast(
@@ -246,21 +258,40 @@ defmodule Librarian.Consolidator do
        merging is allowed.
   """
   def can_merge?(memory_a, memory_b) do
-    # If they share the same ingestion correlation parent, do not merge
-    # mechanical chunks from the same document dump.
-    if memory_a.correlation_id == memory_b.correlation_id and not is_nil(memory_a.correlation_id) do
-      false
-    else
-      project_a = project_tag(memory_a)
-      project_b = project_tag(memory_b)
+    bucket_a = bucket_bare(memory_a.bucket)
+    bucket_b = bucket_bare(memory_b.bucket)
 
-      case {project_a, project_b} do
-        {nil, _} -> true
-        {_, nil} -> true
-        {a, b} -> a == b
-      end
+    cond do
+      # Guard 0: Never merge across different bucket lanes. A cosine match
+      # between an "ideas" memory and a "research" memory is a cross-bucket
+      # connection, not a consolidation candidate.
+      bucket_a != bucket_b ->
+        false
+
+      # Guard 1: Never crush same-document chunks back together.
+      memory_a.correlation_id == memory_b.correlation_id and
+          not is_nil(memory_a.correlation_id) ->
+        false
+
+      # Guard 2: Project tag boundary — if both memories carry explicit
+      # "project-X" tags, they must match before merging.
+      true ->
+        project_a = project_tag(memory_a)
+        project_b = project_tag(memory_b)
+
+        case {project_a, project_b} do
+          {nil, _} -> true
+          {_, nil} -> true
+          {a, b} -> a == b
+        end
     end
   end
+
+  defp bucket_bare(bucket) when is_binary(bucket) do
+    bucket |> String.split(":") |> List.last()
+  end
+
+  defp bucket_bare(_), do: "inbox"
 
   defp project_tag(memory) do
     Enum.find(memory.tags || [], &String.starts_with?(&1, "project-"))

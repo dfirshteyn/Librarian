@@ -67,6 +67,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:publish_confirm_id, nil)
      |> assign(:publish_confirm_synthesis, nil)
      |> assign(:auto_consolidation_enabled, Librarian.Consolidation.AutomationServer.enabled?())
+     |> assign(:active_bucket, "all")
      |> assign(
        :flush_concurrency,
        Application.get_env(:librarian, :parallel_flush_max_concurrency, 1)
@@ -412,13 +413,56 @@ defmodule LibrarianWeb.DashboardLive do
   def handle_event("force_consolidation", _params, socket) do
     tid = socket.assigns.tenant_id
     force_local = socket.assigns.force_local
+    active_bucket = socket.assigns.active_bucket
+
+    label =
+      if active_bucket == "all",
+        do: tid,
+        else: "#{tid}:#{active_bucket} (bucket-scoped)"
 
     Task.start(fn ->
-      Librarian.Consolidator.consolidate(tid, force_local: force_local)
+      Librarian.Consolidator.consolidate(tid,
+        force_local: force_local,
+        bucket_filter: (if active_bucket == "all", do: nil, else: active_bucket)
+      )
       Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
     end)
 
-    {:noreply, put_flash(socket, :info, "Consolidation sweep started for #{tid}")}
+    {:noreply, put_flash(socket, :info, "Consolidation sweep started for #{label}")}
+  end
+
+  # ── Bucket filter ────────────────────────────────────────────────────
+  # Clicking a bucket pill sets @active_bucket which filters the WARM card
+  # list without reloading the page. "all" shows every bucket.
+  def handle_event("set_active_bucket", %{"bucket" => bucket}, socket) do
+    {:noreply, assign(socket, :active_bucket, bucket)}
+  end
+
+  # ── Re-bucket a WARM memory ──────────────────────────────────────────
+  # Lets users override the 0.6B model's bucket decision before delegation.
+  # Cannot re-bucket a locked or published memory.
+  def handle_event("rebucket_memory", %{"id" => id, "bucket" => new_bucket}, socket) do
+    tid = socket.assigns.tenant_id
+    memory_id = String.to_integer(id)
+
+    case Librarian.WarmStore.get(memory_id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Memory not found")}
+
+      %{locked: true} ->
+        {:noreply, put_flash(socket, :error, "Memory is locked — wait for delegation to finish")}
+
+      %{published: true} ->
+        {:noreply, put_flash(socket, :error, "Published memories cannot be re-bucketed")}
+
+      _memory ->
+        full_bucket = "#{tid}:#{new_bucket}"
+        Librarian.WarmStore.update(memory_id, %{bucket: full_bucket})
+        {:noreply,
+         socket
+         |> assign_memories(tid)
+         |> put_flash(:info, "Moved to #{new_bucket}")}
+    end
   end
 
   # ── Delegate to Council (single memory) ──────────────────────────
@@ -748,16 +792,64 @@ defmodule LibrarianWeb.DashboardLive do
 
   @impl true
   def render(assigns) do
+    # Compute per-bucket counts from the full memories list for the filter bar.
+    # We do this in render (not a separate assign) so it stays in sync with
+    # @memories without needing an extra broadcast cycle.
+    bucket_counts =
+      assigns.memories
+      |> Enum.group_by(fn m -> m.bucket |> String.split(":") |> List.last() end)
+      |> Map.new(fn {b, ms} -> {b, length(ms)} end)
+
+    # The visible warm cards are filtered by active_bucket.
+    # "all" shows everything; any other value filters to that bare bucket name.
+    filtered_memories =
+      if assigns.active_bucket == "all" do
+        assigns.memories
+      else
+        Enum.filter(assigns.memories, fn m ->
+          (m.bucket |> String.split(":") |> List.last()) == assigns.active_bucket
+        end)
+      end
+
+    assigns =
+      assigns
+      |> assign(:bucket_counts, bucket_counts)
+      |> assign(:filtered_memories, filtered_memories)
+
     ~H"""
     <div class="min-h-screen bg-gray-950 text-gray-100 font-mono p-4">
       <.header token_savings={@token_savings} flush_concurrency={@flush_concurrency} demo_running={@demo_running} demo_total={@demo_total} />
       <.tenant_banner tenant_id={@tenant_id} tier={@tier} force_local={@force_local} />
       <.tier_bar hot_counts={@hot_counts} memories={@memories} tenant_id={@tenant_id} superseded_count={@superseded_count} cold_count={@cold_count} />
 
-      <div class="flex gap-2 mb-4 items-center">
+      <%!-- ── Bucket Filter Bar ─────────────────────────────────────────── --%>
+      <div class="flex gap-2 mb-3 flex-wrap items-center">
+        <span class="text-[10px] text-gray-500 uppercase tracking-widest mr-1">Bucket</span>
+
+        <button phx-click="set_active_bucket" phx-value-bucket="all"
+          class={"text-[11px] px-2.5 py-1 rounded-full font-bold border transition " <>
+            if(@active_bucket == "all",
+              do: "bg-indigo-600 border-indigo-400 text-white",
+              else: "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700")}>
+          All (<%= length(@memories) %>)
+        </button>
+
+        <%= for {bucket, count} <- Enum.sort(@bucket_counts) do %>
+          <button phx-click="set_active_bucket" phx-value-bucket={bucket}
+            class={"text-[11px] px-2.5 py-1 rounded-full font-bold border transition " <>
+              if(@active_bucket == bucket,
+                do: "bg-indigo-600 border-indigo-400 text-white",
+                else: "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700")}>
+            <%= bucket_icon(bucket) %> <%= bucket %> (<%= count %>)
+          </button>
+        <% end %>
+      </div>
+
+      <%!-- ── Action Controls ──────────────────────────────────────────── --%>
+      <div class="flex gap-2 mb-4 items-center flex-wrap">
         <button phx-click="force_consolidation"
           class="text-xs bg-fuchsia-700 hover:bg-fuchsia-600 text-white px-3 py-1.5 rounded font-bold transition">
-          ⚡ Force Consolidation Sweep
+          <%= if @active_bucket == "all", do: "⚡ Force Consolidation Sweep", else: "⚡ Sweep: #{@active_bucket}" %>
         </button>
 
         <button phx-click="toggle_auto_consolidation"
@@ -769,7 +861,6 @@ defmodule LibrarianWeb.DashboardLive do
         </button>
 
         <%= if @tier == :judge do %>
-          <%!-- Judges can switch between Cloud Qwen API and Local 1.7B --%>
           <button phx-click="toggle_force_local"
             class={"text-xs px-3 py-1.5 rounded font-bold transition border " <>
               if(@force_local,
@@ -778,16 +869,15 @@ defmodule LibrarianWeb.DashboardLive do
             <%= if @force_local, do: "🖥️ Local 1.7B Active", else: "☁️ Cloud Qwen API Active" %>
           </button>
         <% else %>
-          <%!-- Free/anon users always use the local model — no toggle visible --%>
           <span class="text-xs text-gray-600 px-2 py-1.5 rounded border border-gray-800 select-none">
             🖥️ Local Model
           </span>
         <% end %>
       </div>
 
-      <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 160px);">
+      <div class="grid grid-cols-3 gap-4 mb-4" style="height: calc(50vh - 180px);">
         <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} />
-        <.warm_cards tenant_id={@tenant_id} memories={@memories} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} />
+        <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} />
         <.insights_panel insights={@insights} />
       </div>
 
@@ -806,4 +896,14 @@ defmodule LibrarianWeb.DashboardLive do
     </div>
     """
   end
+
+  # ── Bucket icon helper ────────────────────────────────────────────────
+
+  defp bucket_icon("inbox"), do: "📥"
+  defp bucket_icon("project"), do: "🛠️"
+  defp bucket_icon("research"), do: "🔬"
+  defp bucket_icon("ideas"), do: "💡"
+  defp bucket_icon("thoughts"), do: "💭"
+  defp bucket_icon("finance"), do: "💰"
+  defp bucket_icon(_), do: "📂"
 end

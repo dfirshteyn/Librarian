@@ -5,6 +5,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   attr(:tenant_id, :string, required: true)
   attr(:memories, :list, required: true)
+  attr(:active_bucket, :string, required: true)
   attr(:expanded_memories, :any, required: true)
   attr(:council_pending, :any, required: true)
   attr(:publish_pending, :any, required: true)
@@ -15,7 +16,12 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
     <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
       <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
         🧠 WARM Memory Tier
-        <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
+        <span class="text-indigo-400 text-[10px]">(<%= tenant_short(@tenant_id) %>)</span>
+        <%= if @active_bucket != "all" do %>
+          <span class="text-indigo-300 text-[10px] ml-1 bg-indigo-900/40 px-1.5 py-0.5 rounded">
+            <%= @active_bucket %>
+          </span>
+        <% end %>
       </h2>
       <div class="flex-1 overflow-y-auto space-y-3">
         <%= for memory <- Enum.sort_by(@memories, &(-&1.importance)) do %>
@@ -27,7 +33,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
             tenant_id={@tenant_id} />
         <% end %>
         <p :if={@memories == []} class="text-gray-600 text-xs">
-          No memories yet. Run Flood Demo or Swarm Demo to populate.
+          No memories yet. Use the Ingest Feed or run Seed Demo to populate.
         </p>
       </div>
     </div>
@@ -94,6 +100,28 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
       <%= if @expanded? do %>
         <.memory_detail memory={@memory} />
+        <%!-- Re-bucket dropdown: only for unlocked, unpublished memories --%>
+        <%= if not @submitted? and not @published? and not @locked? do %>
+          <div class="mt-2 pt-2 border-t border-gray-700/50" phx-click="ignore" phx-no-propagate>
+            <form phx-submit="rebucket_memory" phx-click-away="noop">
+              <input type="hidden" name="id" value={@memory.id} />
+              <div class="flex gap-1 items-center">
+                <span class="text-[10px] text-gray-500">Move to:</span>
+                <select name="bucket"
+                  class="text-[10px] bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-gray-300 focus:outline-none focus:border-indigo-500"
+                  phx-click-away="noop">
+                  <%= for b <- buckets_list() do %>
+                    <option value={b} selected={String.ends_with?(@memory.bucket, ":#{b}")}><%= b %></option>
+                  <% end %>
+                </select>
+                <button type="submit"
+                  class="text-[10px] bg-indigo-800 hover:bg-indigo-700 text-white px-1.5 py-0.5 rounded transition">
+                  Move
+                </button>
+              </div>
+            </form>
+          </div>
+        <% end %>
         <%= if @submitted? and not @published? do %>
           <.council_detail memory={@memory} />
           <button phx-click="publish_memory" phx-value-id={@memory.id}
