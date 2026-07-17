@@ -466,11 +466,12 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   def handle_event("nightly_pass", _params, socket) do
+    tid = socket.assigns.tenant_id
     concurrency = socket.assigns.flush_concurrency
     force_local = socket.assigns.force_local
 
     Task.start(fn ->
-      Flusher.flush_all(concurrency, force_local: force_local)
+      Flusher.flush_all(tid, concurrency, force_local: force_local)
       Flusher.nightly_pass()
       Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all})
     end)
@@ -680,23 +681,20 @@ defmodule LibrarianWeb.DashboardLive do
         }
 
         case Librarian.IngestRouter.process(ingest_params, tid) do
-          {:ok, bucket} ->
+          {:ok, _bucket} ->
             {:noreply,
              socket
              |> assign(:ingest_text, "")
-             |> put_flash(:info, "File uploaded to \#{bucket}")}
+             |> put_flash(:info, "File uploaded")}
 
-          {:ok, bucket, chunk_count} ->
+          {:ok, _bucket, _chunk_count} ->
             {:noreply,
              socket
              |> assign(:ingest_text, "")
-             |> put_flash(
-               :info,
-               "File uploaded (chunked into \#{chunk_count} pieces) to \#{bucket}"
-             )}
+             |> put_flash(:info, "File uploaded (chunked)")}
 
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Upload failed: \#{inspect(reason)}")}
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Upload failed")}
         end
 
       _ ->

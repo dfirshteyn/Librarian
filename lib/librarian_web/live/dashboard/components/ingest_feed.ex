@@ -33,14 +33,25 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
         </div>
       </form>
 
-      <form phx-submit="file_upload" class="mb-4 space-y-2" enctype="multipart/form-data">
-        <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.txt,.md,.json,.csv"
+      <%!--
+        File upload form targetting a hidden iframe.
+        This keeps the submission on the same page and within the same session,
+        so the browser never navigates away from the LiveView.
+        The iframe's onload event triggers a page reload once the upload completes,
+        so the dashboard picks up the new HOT entry.
+      --%>
+      <form action="/api/ingest/file" method="post" class="mb-4 space-y-2" enctype="multipart/form-data"
+            target="upload-iframe" onsubmit="setTimeout(function(){document.getElementById('file-input').value=''},100)">
+        <input type="file" name="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.txt,.md,.json,.csv"
           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white file:text-blue-400 file:cursor-pointer" />
         <button type="submit"
           class="w-full px-3 py-1.5 bg-purple-700 hover:bg-purple-600 rounded text-sm transition">
           📎 Upload File
         </button>
       </form>
+      <iframe name="upload-iframe" id="upload-iframe" style="display:none"
+              onload="(function(){var f=document.getElementById('upload-iframe');if(f.dataset.loaded){window.location.reload()}else{f.dataset.loaded='1'}})()">
+      </iframe>
 
       <div class="flex-1 overflow-y-auto space-y-2" id="feed" phx-update="stream" style="max-height: 400px;">
         <div :if={@feed_empty} id="feed-empty" class="text-gray-600 text-xs">

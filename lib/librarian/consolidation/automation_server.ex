@@ -23,7 +23,9 @@ defmodule Librarian.Consolidation.AutomationServer do
 
   @impl true
   def init(_opts) do
-    schedule_poll()
+    # NOTE: Auto-polling is DISABLED. Consolidation only runs when explicitly
+    # triggered via trigger_now/1 or the "Force Consolidation Sweep" button.
+    # schedule_poll()
     schedule_daily_sweep()
     {:ok, %{in_progress: MapSet.new(), monitors: %{}}}
   end
