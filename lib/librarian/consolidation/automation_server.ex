@@ -23,14 +23,26 @@ defmodule Librarian.Consolidation.AutomationServer do
 
   @impl true
   def init(_opts) do
-    # NOTE: Auto-polling is DISABLED. Consolidation only runs when explicitly
-    # triggered via trigger_now/1 or the "Force Consolidation Sweep" button.
-    # schedule_poll()
+    schedule_poll()
     schedule_daily_sweep()
-    {:ok, %{in_progress: MapSet.new(), monitors: %{}}}
+    {:ok, %{in_progress: MapSet.new(), monitors: %{}, enabled: true}}
   end
 
   # ── Public API ─────────────────────────────────────────────────────
+
+  @doc """
+  Enable or disable auto-consolidation.
+  """
+  def set_enabled(enabled) when is_boolean(enabled) do
+    GenServer.call(__MODULE__, {:set_enabled, enabled})
+  end
+
+  @doc """
+  Check if auto-consolidation is enabled.
+  """
+  def enabled? do
+    GenServer.call(__MODULE__, :enabled?)
+  end
 
   @doc """
   Trigger an immediate consolidation for a specific user_id.
@@ -41,6 +53,16 @@ defmodule Librarian.Consolidation.AutomationServer do
   end
 
   # ── Call handlers ──────────────────────────────────────────────────
+
+  @impl true
+  def handle_call({:set_enabled, enabled}, _from, state) do
+    {:reply, :ok, Map.put(state, :enabled, enabled)}
+  end
+
+  @impl true
+  def handle_call(:enabled?, _from, state) do
+    {:reply, Map.get(state, :enabled, true), state}
+  end
 
   @impl true
   def handle_call({:trigger, user_id}, _from, %{in_progress: in_progress} = state) do
@@ -56,7 +78,12 @@ defmodule Librarian.Consolidation.AutomationServer do
 
   @impl true
   def handle_info(:poll, state) do
-    state = check_and_spawn(state)
+    state =
+      if Map.get(state, :enabled, true) do
+        check_and_spawn(state)
+      else
+        state
+      end
     schedule_poll()
     {:noreply, state}
   end

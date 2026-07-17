@@ -24,3 +24,11 @@ config :librarian, consolidation_curator: Librarian.Curator.Stub
 # Free tier curator in test: Stub (no network). Judges still resolve to QwenApi
 # but no test exercises that path with real network calls.
 config :librarian, free_tier_curator: Librarian.Curator.Stub
+
+# Mock Req module to force all LLM HTTP calls to fail in test mode.
+# This ensures delegation tests verify lock auto-release on Council failure
+# without requiring actual LLM servers or API keys.
+config :librarian, :req_module, {:mock, Librarian.Test.MockReq}
+
+# Provide a fake API key since QwenApi raises on missing key
+config :librarian, :dashscope_api_key, "test_key_not_used_due_to_mock"

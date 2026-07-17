@@ -483,6 +483,19 @@ defmodule Librarian.ColdStore do
     :ok
   end
 
+  @doc """
+  Count the total number of memories stored in the SQLite COLD store for a user.
+  """
+  @spec count(String.t()) :: integer()
+  def count(user_id) when is_binary(user_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    case Exqlite.query(conn, "SELECT COUNT(*) FROM memories", []) do
+      {:ok, %{rows: [[count]]}} -> count
+      _ -> 0
+    end
+  end
+
   # ── FTS5 search ────────────────────────────────────────────────────
 
   @doc """

@@ -10,20 +10,20 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
   """
   use LibrarianWeb, :live_component
 
-  @default_interval 30_000
 
   @impl true
   def mount(socket) do
-    if connected?(socket) do
-      :timer.send_interval(@default_interval, self(), :refresh_graph)
-    end
-
     {:ok, assign_graph(socket)}
   end
 
   @impl true
   def update(_assigns, socket) do
     {:ok, assign_graph(socket)}
+  end
+
+  @impl true
+  def handle_event("refresh_graph", _params, socket) do
+    {:noreply, assign_graph(socket)}
   end
 
   def handle_info(:refresh_graph, socket) do
@@ -40,9 +40,15 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
     ~H"""
     <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 h-full flex flex-col">
       <div class="flex justify-between items-center mb-2">
-        <h3 class="text-xs font-bold text-cyan-400 uppercase tracking-wider">
-          🌐 Public Knowledge Graph
-        </h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-xs font-bold text-cyan-400 uppercase tracking-wider">
+            🌐 Public Knowledge Graph
+          </h3>
+          <button phx-click="refresh_graph" phx-target={@myself}
+            class="text-[9px] bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 px-1.5 py-0.5 rounded transition">
+            🔄 Sync
+          </button>
+        </div>
         <span class="text-[10px] text-gray-500">
           {@graph.nodes |> length()} nodes · {@graph.edges |> length()} edges
         </span>

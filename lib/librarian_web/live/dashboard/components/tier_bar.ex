@@ -7,6 +7,7 @@ defmodule LibrarianWeb.Dashboard.Components.TierBar do
   attr(:memories, :list, required: true)
   attr(:tenant_id, :string, required: true)
   attr(:superseded_count, :integer, default: 0)
+  attr(:cold_count, :integer, default: 0)
 
   def tier_bar(assigns) do
     ~H"""
@@ -23,6 +24,10 @@ defmodule LibrarianWeb.Dashboard.Components.TierBar do
       <div class="flex items-center gap-2 bg-gray-800 rounded px-3 py-1.5">
         <span class="text-xs text-gray-300">WARM</span>
         <span class="text-xs font-bold text-white"><%= length(@memories) %></span>
+      </div>
+      <div class="flex items-center gap-2 bg-blue-950/40 rounded px-3 py-1.5 border border-blue-800/40">
+        <span class="text-xs text-blue-300">❄️ COLD</span>
+        <span class="text-xs font-bold text-blue-200"><%= @cold_count %></span>
       </div>
       <%= if @superseded_count > 0 do %>
         <div class="flex items-center gap-2 bg-purple-950/40 rounded px-3 py-1.5 border border-purple-800/40">

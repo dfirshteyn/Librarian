@@ -68,6 +68,9 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
                 <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(mem.bucket)}"} />
                 <span class="text-gray-200 font-bold"><%= mem.bucket %></span>
                 <span class="text-gray-500">#<%= mem.id %></span>
+                <span class={"text-[9px] font-bold px-1 rounded " <> if(Map.get(mem, :tier) == "cold", do: "bg-blue-900/60 text-blue-300 border border-blue-700/40", else: "bg-purple-900/60 text-purple-300 border border-purple-700/40")}>
+                  <%= String.upcase(Map.get(mem, :tier, "warm")) %>
+                </span>
                 <span class="text-gray-500 ml-auto">imp=<%= Float.round(mem.importance, 2) %></span>
               </div>
               <p class="text-gray-300 mb-1"><%= mem.summary %></p>
@@ -97,6 +100,14 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
             <p class="text-gray-500 mb-1">WARM (top 5):</p>
             <ul class="text-gray-300 space-y-1">
               <%= for s <- @response.warm do %>
+                <li>• <%= s %></li>
+              <% end %>
+            </ul>
+          <% end %>
+          <%= if Map.get(@response, :cold) && @response.cold != [] do %>
+            <p class="text-blue-400 mb-1 mt-2">COLD (top 3):</p>
+            <ul class="text-blue-300 space-y-1">
+              <%= for s <- @response.cold do %>
                 <li>• <%= s %></li>
               <% end %>
             </ul>

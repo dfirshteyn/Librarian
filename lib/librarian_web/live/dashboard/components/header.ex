@@ -34,15 +34,10 @@ defmodule LibrarianWeb.Dashboard.Components.Header do
             <option value={c} selected={@flush_concurrency == c}><%= c %>x</option>
           <% end %>
         </select>
-        <button phx-click="flood_demo"
+        <button phx-click="seed_demo"
           disabled={@demo_running}
-          class={if @demo_running, do: "px-3 py-1.5 rounded text-sm transition bg-gray-700 cursor-not-allowed", else: "px-3 py-1.5 rounded text-sm transition bg-green-700 hover:bg-green-600"}>
-          <%= if @demo_running, do: "Running... #{@demo_total}", else: "Flood Demo" %>
-        </button>
-        <button phx-click="swarm_demo"
-          disabled={@demo_running}
-          class={if @demo_running, do: "px-3 py-1.5 rounded text-sm transition bg-gray-700 cursor-not-allowed", else: "px-3 py-1.5 rounded text-sm transition bg-amber-600 hover:bg-amber-500"}>
-          <%= if @demo_running, do: "Running... #{@demo_total}", else: "🐝 Swarm Demo" %>
+          class={if @demo_running, do: "px-3 py-1.5 rounded text-sm transition bg-gray-700 cursor-not-allowed", else: "px-3 py-1.5 rounded text-sm transition bg-emerald-700 hover:bg-emerald-600"}>
+          <%= if @demo_running, do: "Seeding...", else: "🌱 Seed Demo" %>
         </button>
       </div>
     </div>

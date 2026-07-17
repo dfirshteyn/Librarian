@@ -213,6 +213,7 @@ defmodule Librarian.Curator.QwenApi do
   # %Req.Request{} with a plug: plug already attached.
   defp req do
     case Application.get_env(:librarian, :req_module) do
+      {:mock, mock_finch} -> Req.new() |> Map.put(:private, %{req_finch: mock_finch})
       nil -> Req.new()
       %Req.Request{} = r -> r
       _ -> Req.new()
