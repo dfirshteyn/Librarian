@@ -30,6 +30,16 @@ defmodule Librarian.HotStore do
     GenServer.call(via(bucket), {:put_unless_duplicate, payload})
   end
 
+  @doc """
+  Store a payload deterministically - skips the raw_text duplicate check.
+  Used for file chunks which are uniquely identified by their source + index.
+  Returns `{:ok, :stored}` - never returns duplicate.
+  """
+  def put_deterministic(bucket, %Librarian.Capture.Payload{} = payload) do
+    ensure_started(bucket)
+    GenServer.call(via(bucket), {:put_deterministic, payload})
+  end
+
   @doc "Check if a payload with the same raw_text already exists in this HOT bucket."
   def contains_text?(bucket, text) do
     case Registry.lookup(@registry, bucket) do
@@ -201,6 +211,18 @@ defmodule Librarian.HotStore do
       :ets.insert(table, {seq, payload})
       {:reply, {:ok, :stored}, %{state | seq: seq + 1}}
     end
+  end
+
+  @impl true
+  def handle_call(
+        {:put_deterministic, payload},
+        _from,
+        %{bucket: bucket, table: table, seq: seq} = state
+      ) do
+    # Skip the duplicate check - chunks are uniquely identified by source+index
+    Librarian.Wal.append(bucket, payload)
+    :ets.insert(table, {seq, payload})
+    {:reply, {:ok, :stored}, %{state | seq: seq + 1}}
   end
 
   @impl true

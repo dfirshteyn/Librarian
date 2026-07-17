@@ -14,6 +14,8 @@ defmodule Librarian.IngestRouter do
   alias Librarian.Utils.FileDetector
   alias Librarian.Utils.FileStore
   alias Librarian.Utils.PdfExtractor
+  alias Librarian.Router
+  alias Librarian.HotStore
 
   @default_large_text_threshold 1500
   @default_chunk_size 350
@@ -279,19 +281,47 @@ defmodule Librarian.IngestRouter do
     # Register with ChunkTracker BEFORE dispatching any concurrent ingestion
     :ok = Librarian.ChunkTracker.register_chunks(correlation_id, total_chunks, user_id)
 
-    # Process chunks concurrently
+    # Process chunks concurrently using deterministic storage.
+    # Chunks are uniquely identified by their source path + index, not raw_text.
+    # This avoids the overlap-duplicate bug where chunk N's tail matches chunk N+1's head.
     results =
       chunks
       |> Task.async_stream(
         fn %{text: chunk_text, metadata: meta} ->
+          # Strip the "Document: filename\n\n" prefix from chunk text so
+          # each chunk only contains the actual extracted content.
+          clean_text =
+            chunk_text
+            |> String.replace(~r/^Document:\s+[^\n]+\n\n/, "", global: false)
+
           chunk_payload = %Payload{
             payload
-            | raw_text: chunk_text,
+            | raw_text: clean_text,
               parent_id: correlation_id,
-              chunk_index: meta.chunk_index
+              chunk_index: meta.chunk_index,
+              # Carry forward file metadata so the flusher can store it
+              # on each chunk's WARM memory for the ancestry modal
+              stored_path: payload.stored_path,
+              file_type: payload.file_type,
+              dimensions: payload.dimensions
           }
 
-          Librarian.ingest(chunk_payload, user_id)
+          # Use deterministic storage - skip text dedup, chunks are unique by source+index
+          {bucket, _tags} = Router.route(chunk_payload, user_id)
+
+          case HotStore.put_deterministic(bucket, chunk_payload) do
+            {:ok, :stored} ->
+              Phoenix.PubSub.broadcast(
+                Librarian.PubSub,
+                "ingest",
+                {:ingested, bucket, chunk_payload.source, String.slice(clean_text, 0, 80), user_id}
+              )
+
+              {:ok, bucket}
+
+            _ ->
+              {:ok, {:error, "Deterministic put failed"}}
+          end
         end,
         timeout: 30_000,
         on_timeout: :kill_task,
@@ -299,17 +329,16 @@ defmodule Librarian.IngestRouter do
       )
       |> Enum.to_list()
 
-    # Check results
-    case Enum.any?(results, &match?({:error, _}, &1)) do
+    # With deterministic storage, all chunks are stored (no duplicates possible).
+    # The count we registered is accurate.
+    # Check results for errors
+    case Enum.any?(results, &match?({:ok, {:error, _}}, &1)) or
+           Enum.any?(results, &match?({:error, _}, &1)) do
       true ->
         {:error, "Some chunks failed to ingest"}
 
       false ->
-        case List.first(results) do
-          {:ok, {:ok, bucket}} -> {:ok, bucket, length(chunks)}
-          {:ok, {:ok, bucket, :duplicate}} -> {:ok, bucket, length(chunks)}
-          _ -> {:error, "Unknown chunking result"}
-        end
+        {:ok, "#{user_id}:inbox", total_chunks}
     end
   end
 
