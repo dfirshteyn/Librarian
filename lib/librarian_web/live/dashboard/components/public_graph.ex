@@ -10,7 +10,6 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
   """
   use LibrarianWeb, :live_component
 
-
   @impl true
   def mount(socket) do
     {:ok, assign_graph(socket)}

@@ -5,44 +5,57 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
 
   attr(:tenant_id, :string, required: true)
   attr(:structured_response, :any, required: true)
+  attr(:show, :boolean, default: false)
 
   def structured_recall_terminal(assigns) do
     ~H"""
-    <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col border border-green-800">
-      <h2 class="text-sm font-bold text-green-300 mb-3 uppercase tracking-wider">
-        💻 Structured Recall
-        <span class="text-green-600 text-[10px]">/model /recall /status</span>
-        <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
-      </h2>
-      <form phx-submit="structured_recall" class="mb-3">
-        <div class="flex gap-2">
-          <span class="text-green-400 text-sm font-bold">$></span>
-          <input type="text" name="command"
-            placeholder="/model db perf | /trace deploy | /ancestry 12 | /status"
-            class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
-          <button type="submit"
-            class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
-            Run
+    <div class={"fixed inset-0 z-40 flex items-end justify-center pointer-events-none " <> if(@show, do: "", else: "hidden")}>
+      <div class="absolute inset-0 bg-black/50 pointer-events-auto" phx-click="toggle_terminal"></div>
+      <div class={"relative w-full max-w-3xl bg-gray-900 border border-green-800 rounded-t-xl shadow-2xl pointer-events-auto transition-transform duration-300 " <>
+        if(@show, do: "translate-y-0 max-h-[70vh]", else: "translate-y-full")}
+        style={if(@show, do: "max-height: 70vh; overflow: hidden;", else: "")}>
+        <div class="flex items-center justify-between px-4 py-3 border-b border-green-900">
+          <h2 class="text-sm font-bold text-green-300 uppercase tracking-wider">
+            💻 Structured Recall
+            <span class="text-green-600 text-[10px] ml-2">/model /recall /status</span>
+          </h2>
+          <button phx-click="toggle_terminal"
+            class="text-gray-500 hover:text-gray-300 transition text-lg leading-none">
+            ✕
           </button>
         </div>
-      </form>
+        <div class="p-4 overflow-y-auto" style="max-height: calc(70vh - 52px);">
+          <form phx-submit="structured_recall" class="mb-3">
+            <div class="flex gap-2">
+              <span class="text-green-400 text-sm font-bold">$></span>
+              <input type="text" name="command"
+                placeholder="/model db perf | /trace deploy | /ancestry 12 | /status"
+                class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
+              <button type="submit"
+                class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
+                Run
+              </button>
+            </div>
+          </form>
 
-      <div class="flex-1 overflow-y-auto bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs">
-        <%= if @structured_response do %>
-          <.structured_response response={@structured_response} tenant_id={@tenant_id} />
-        <% else %>
-          <p class="text-gray-600">
-            Memory as a database. Type a command:
-          </p>
-          <ul class="text-gray-600 mt-2 space-y-1">
-            <li><span class="text-green-600">/model [query]</span> — structured facts from matching memories</li>
-            <li><span class="text-cyan-600">/recall [query]</span> — search summaries with synaptic jumps</li>
-            <li><span class="text-amber-600">/status</span> — tier counts for current session</li>
-          </ul>
-          <p class="text-gray-700 mt-3 text-[10px]">
-            Queries isolated to your session sandbox. Export your data anytime.
-          </p>
-        <% end %>
+          <div class="bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs max-h-[50vh] overflow-y-auto">
+            <%= if @structured_response do %>
+              <.structured_response response={@structured_response} tenant_id={@tenant_id} />
+            <% else %>
+              <p class="text-gray-600">
+                Memory as a database. Type a command:
+              </p>
+              <ul class="text-gray-600 mt-2 space-y-1">
+                <li><span class="text-green-600">/model [query]</span> — structured facts from matching memories</li>
+                <li><span class="text-cyan-600">/recall [query]</span> — search summaries with synaptic jumps</li>
+                <li><span class="text-amber-600">/status</span> — tier counts for current session</li>
+              </ul>
+              <p class="text-gray-700 mt-3 text-[10px]">
+                Queries isolated to your session sandbox. Export your data anytime.
+              </p>
+            <% end %>
+          </div>
+        </div>
       </div>
     </div>
     """

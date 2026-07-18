@@ -13,8 +13,14 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
     ~H"""
     <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
       <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-        ⚡ Live Ingest Feed
+        🔥 HOT Ingest & Workspace
         <span class="text-indigo-400 text-[10px]">[<%= tenant_short(@tenant_id) %>]</span>
+        <span class="text-[10px] text-gray-500 font-normal ml-1 group relative">
+          ℹ️
+          <span class="absolute bottom-full left-0 mb-1 hidden group-hover:block bg-gray-800 text-[10px] text-gray-300 px-2 py-1 rounded shadow-lg whitespace-nowrap z-10 border border-gray-700">
+            Text hits the local WAL instantly. WARM summaries managed by 0.6B model; 1.7B for Council validation
+          </span>
+        </span>
       </h2>
 
       <form phx-submit="manual_ingest" class="mb-4 space-y-2">

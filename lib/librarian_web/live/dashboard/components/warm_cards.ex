@@ -17,6 +17,12 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
         🧠 WARM Memory Tier
         <span class="text-indigo-400 text-[10px]">(<%= tenant_short(@tenant_id) %>)</span>
+        <span class="text-[10px] text-gray-500 font-normal ml-1 group relative">
+          ℹ️
+          <span class="absolute bottom-full left-0 mb-1 hidden group-hover:block bg-gray-800 text-[10px] text-gray-300 px-2 py-1 rounded shadow-lg whitespace-nowrap z-10 border border-gray-700">
+            Quantized 1024-dim BGE-M3 summaries managed by local 0.6B model
+          </span>
+        </span>
         <%= if @active_bucket != "all" do %>
           <span class="text-indigo-300 text-[10px] ml-1 bg-indigo-900/40 px-1.5 py-0.5 rounded">
             <%= @active_bucket %>
