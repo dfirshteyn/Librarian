@@ -100,10 +100,18 @@ defmodule Librarian.TenantConfig do
     ]
   end
 
+  @doc """
+  Check if nightly pass is enabled for a tenant.
+  """
+  def nightly_pass_enabled?(user_id) when is_binary(user_id) do
+    get(user_id, :nightly_pass_enabled) == true
+  end
+
   # ── Private ──────────────────────────────────────────────────────────────
 
   defp default_for(:auto_flush_enabled), do: true
   defp default_for(:auto_consolidation_enabled), do: true
+  defp default_for(:nightly_pass_enabled), do: true
   defp default_for(:flush_threshold), do: @default_flush_threshold
   defp default_for(:flush_timeout_sec), do: @default_flush_timeout_sec
   defp default_for(_), do: nil

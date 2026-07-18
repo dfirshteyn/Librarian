@@ -35,37 +35,34 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
         <% end %>
       </div>
 
-      <form phx-submit="manual_ingest" class="mb-4 space-y-2">
-        <textarea name="text" value={@ingest_text} rows="2" placeholder="Paste text to ingest..."
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"></textarea>
+      <form phx-submit="manual_ingest" class="mb-3 space-y-2.5">
+        <textarea name="text" value={@ingest_text} rows="3" placeholder="Paste text to ingest..."
+          class="w-full bg-gray-800/80 border border-gray-700 focus:border-blue-500/80 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all resize-none"></textarea>
         <div class="flex gap-2">
-          <select name="bucket" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
+          <select name="bucket" class="bg-gray-800/80 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer">
             <%= for b <- buckets_list() do %>
               <option value={b} selected={@ingest_bucket == b}><%= b %></option>
             <% end %>
           </select>
           <button type="submit"
-            class="flex-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded text-sm transition">
-            Ingest
+            class="flex-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-600 rounded-lg text-xs font-bold transition cursor-pointer active:scale-95">
+            Ingest to HOT
           </button>
         </div>
       </form>
 
       <%!--
         File upload form targetting a hidden iframe.
-        This keeps the submission on the same page and within the same session,
-        so the browser never navigates away from the LiveView.
-        The iframe's onload event triggers a page reload once the upload completes,
-        so the dashboard picks up the new HOT entry.
+        Stays on the same page and submits instantly once a file is chosen, reloading dynamically.
       --%>
-      <form action="/api/ingest/file" method="post" class="mb-4 space-y-2" enctype="multipart/form-data"
-            target="upload-iframe" onsubmit="setTimeout(function(){document.getElementById('file-input').value=''},100)">
-        <input type="file" name="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.txt,.md,.json,.csv"
-          class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white file:text-blue-400 file:cursor-pointer" />
-        <button type="submit"
-          class="w-full px-3 py-1.5 bg-purple-700 hover:bg-purple-600 rounded text-sm transition">
-          📎 Upload File
-        </button>
+      <form action="/api/ingest/file" method="post" enctype="multipart/form-data"
+            target="upload-iframe" class="mb-3">
+        <label for="file-input" class="cursor-pointer flex flex-col items-center justify-center gap-1.5 bg-gray-800/50 hover:bg-gray-800/80 border border-gray-700/80 border-dashed rounded-lg py-3.5 text-xs text-gray-400 hover:text-gray-200 transition-all active:scale-[0.99] select-none">
+          <span class="text-base">📎</span>
+          <span class="font-bold text-[11px] tracking-wide">Choose or drag a file to ingest</span>
+          <span class="text-[9px] text-gray-500">PDF, TXT, MD, JSON, CSV</span>
+          <input type="file" name="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.txt,.md,.json,.csv" class="hidden" onchange="this.form.submit()" />
+        </label>
       </form>
       <iframe name="upload-iframe" id="upload-iframe" style="display:none"
               onload="(function(){var f=document.getElementById('upload-iframe');if(f.dataset.loaded){window.location.reload()}else{f.dataset.loaded='1'}})()">

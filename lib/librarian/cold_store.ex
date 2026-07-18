@@ -70,14 +70,19 @@ defmodule Librarian.ColdStore do
 
     metadata_json = Librarian.Json.encode!(metadata)
 
-    {:ok, _} =
-      Exqlite.query(
-        conn,
-        "INSERT INTO memory_relationships (source_id, target_id, relationship_type, metadata_json) VALUES (?1, ?2, ?3, ?4)",
-        [source_id, target_id, relationship_type, metadata_json]
-      )
+    case Exqlite.query(
+           conn,
+           "INSERT INTO memory_relationships (source_id, target_id, relationship_type, metadata_json) VALUES (?1, ?2, ?3, ?4)",
+           [source_id, target_id, relationship_type, metadata_json]
+         ) do
+      {:ok, _} ->
+        :ok
 
-    :ok
+      {:error, reason} ->
+        require Logger
+        Logger.error("[ColdStore] Failed to log relationship #{relationship_type} from #{source_id} to #{target_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   @doc """

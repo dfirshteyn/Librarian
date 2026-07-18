@@ -17,9 +17,16 @@ defmodule LibrarianWeb.Dashboard.Components.Header do
           class="text-[10px] bg-indigo-700 hover:bg-indigo-600 text-white px-1.5 py-0.5 rounded transition">
           📋 Copy
         </button>
-        <span class={"text-[10px] text-white px-1.5 py-0.5 rounded font-bold " <> tier_badge_color(@tier, @force_local)}>
-          <%= tier_label(@tier, @force_local) %>
-        </span>
+        <%= if @tier == :judge do %>
+          <button phx-click="toggle_force_local"
+            class={"text-[10px] text-white px-1.5 py-0.5 rounded font-bold transition hover:opacity-90 active:scale-95 cursor-pointer " <> tier_badge_color(@tier, @force_local)}>
+            <%= tier_label(@tier, @force_local) %> (Click to Toggle)
+          </button>
+        <% else %>
+          <span class={"text-[10px] text-white px-1.5 py-0.5 rounded font-bold " <> tier_badge_color(@tier, @force_local)}>
+            <%= tier_label(@tier, @force_local) %>
+          </span>
+        <% end %>
       </div>
       <div class="flex items-center gap-2">
         <button phx-click="seed_demo"

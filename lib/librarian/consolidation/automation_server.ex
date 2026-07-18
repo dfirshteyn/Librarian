@@ -34,6 +34,7 @@ defmodule Librarian.Consolidation.AutomationServer do
   Enable or disable auto-consolidation for a specific user.
   """
   def set_enabled(user_id, enabled) when is_binary(user_id) and is_boolean(enabled) do
+    Librarian.TenantConfig.set(user_id, :auto_consolidation_enabled, enabled)
     GenServer.call(__MODULE__, {:set_enabled, user_id, enabled})
   end
 
@@ -42,10 +43,7 @@ defmodule Librarian.Consolidation.AutomationServer do
   Returns `true` if enabled (default), `false` if disabled.
   """
   def enabled?(user_id) when is_binary(user_id) do
-    case GenServer.call(__MODULE__, {:enabled?, user_id}) do
-      nil -> true
-      val -> val
-    end
+    Librarian.TenantConfig.auto_consolidation_enabled?(user_id)
   end
 
   @doc """
@@ -66,7 +64,11 @@ defmodule Librarian.Consolidation.AutomationServer do
 
   @impl true
   def handle_call({:enabled?, user_id}, _from, state) do
-    {:reply, Map.get(state.enabled, user_id), state}
+    # Fallback to local state if needed, but primary is TenantConfig
+    case Map.get(state.enabled, user_id) do
+      nil -> {:reply, Librarian.TenantConfig.auto_consolidation_enabled?(user_id), state}
+      val -> {:reply, val, state}
+    end
   end
 
   @impl true
@@ -74,9 +76,8 @@ defmodule Librarian.Consolidation.AutomationServer do
     if MapSet.member?(in_progress, user_id) do
       {:reply, {:error, :already_in_progress}, state}
     else
-      # Check if auto-consolidation is enabled for this user (check state directly)
-      user_enabled = Map.get(state.enabled, user_id)
-      if user_enabled != false do
+      # Check if auto-consolidation is enabled for this user
+      if enabled?(user_id) do
         {state, _task} = spawn_consolidation(user_id, state)
         {:reply, {:ok, :started}, state}
       else
@@ -171,7 +172,8 @@ defmodule Librarian.Consolidation.AutomationServer do
       |> Enum.uniq()
       |> Enum.reject(&(&1 in @skip_user_ids))
       |> Enum.filter(fn uid ->
-        not MapSet.member?(state.in_progress, uid) and
+        enabled?(uid) and
+          not MapSet.member?(state.in_progress, uid) and
           Enum.count(all_memories, fn m ->
             String.starts_with?(m.bucket, uid <> ":") and is_nil(m.superseded_by)
           end) >= min_memories

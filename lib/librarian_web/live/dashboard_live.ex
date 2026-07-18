@@ -43,6 +43,7 @@ defmodule LibrarianWeb.DashboardLive do
        :auto_consolidation_enabled,
        Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
      )
+     |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tenant_id))
      |> assign(:query, "")
      |> assign(:recall_results, nil)
      |> assign(:insights, Librarian.morning_briefing(20))
@@ -123,6 +124,10 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, assign(socket, :auto_consolidation_enabled, new_val)}
   end
 
+  def handle_info({:nightly_pass_toggled, new_val}, socket) do
+    {:noreply, assign(socket, :nightly_pass_enabled, new_val)}
+  end
+
   def handle_info(:refresh_warm, socket) do
     tid = socket.assigns.tenant_id
 
@@ -131,6 +136,8 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign_memories(tid)
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tid))
+     |> assign(:auto_consolidation_enabled, Librarian.Consolidation.AutomationServer.enabled?(tid))
+     |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tid))
      |> assign(:insights, Librarian.morning_briefing(20))}
   end
 
@@ -591,6 +598,13 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, socket |> assign(:auto_flush_enabled, nv)}
   end
 
+  def handle_event("toggle_nightly_pass", _params, socket) do
+    nv = not socket.assigns.nightly_pass_enabled
+    Librarian.TenantConfig.set(socket.assigns.tenant_id, :nightly_pass_enabled, nv)
+    Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:nightly_pass_toggled, nv})
+    {:noreply, socket |> assign(:nightly_pass_enabled, nv)}
+  end
+
   def handle_event("flush_all_buckets", _params, socket) do
     tid = socket.assigns.tenant_id
 
@@ -687,7 +701,7 @@ defmodule LibrarianWeb.DashboardLive do
     ~H"""
     <div class="h-screen bg-gray-950 text-gray-100 font-mono p-4 flex flex-col overflow-hidden">
       <.header tenant_id={@tenant_id} tier={@tier} force_local={@force_local} demo_running={@demo_running} />
-      <.control_strip auto_consolidation_enabled={@auto_consolidation_enabled} auto_flush_enabled={@auto_flush_enabled} hot_counts={@hot_counts} active_bucket={@active_bucket} tier={@tier} force_local={@force_local} warm_count={length(@memories)} cold_count={@cold_count} />
+      <.control_strip auto_consolidation_enabled={@auto_consolidation_enabled} auto_flush_enabled={@auto_flush_enabled} nightly_pass_enabled={@nightly_pass_enabled} hot_counts={@hot_counts} active_bucket={@active_bucket} tier={@tier} force_local={@force_local} warm_count={length(@memories)} cold_count={@cold_count} />
       <div class="flex gap-2 mb-3 flex-wrap items-center">
         <span class="text-[10px] text-gray-500 uppercase tracking-widest mr-1">Lanes</span>
         <button phx-click="set_active_bucket" phx-value-bucket="all" class={"text-[11px] px-2.5 py-1 rounded-full font-bold border transition " <> if(@active_bucket == "all", do: "bg-indigo-600 border-indigo-400 text-white", else: "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700")}>📋 All (<%= length(@memories) %>)</button>
@@ -699,7 +713,7 @@ defmodule LibrarianWeb.DashboardLive do
       </div>
       <div class="grid grid-cols-2 gap-4 flex-1 min-h-0">
         <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} hot_counts={@hot_counts} auto_flush_enabled={@auto_flush_enabled} flush_progress={@flush_progress} />
-        <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} flush_progress={@flush_progress} new_memories={@new_memories} />
+        <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} flush_progress={@flush_progress} new_memories={@new_memories} auto_consolidation_enabled={@auto_consolidation_enabled} />
       </div>
       <.drawer_controls show_terminal={@show_terminal} show_graph={@show_graph} show_insights={@show_insights} private_count={@private_count} public_count={@public_count} insights_count={@insights_drawer_count} graph_mode={@graph_mode} />
       <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} show={@show_terminal} />

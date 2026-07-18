@@ -12,25 +12,35 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   attr(:delegation_progress, :any, required: true)
   attr(:flush_progress, :any, required: false)
   attr(:new_memories, :map, required: false, default: %{})
+  attr(:auto_consolidation_enabled, :boolean, required: true)
 
   def warm_cards(assigns) do
     ~H"""
     <div class="bg-gray-900 rounded-lg p-4 overflow-hidden flex flex-col">
-      <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
-        🧠 WARM Memory Tier
-        <span class="text-indigo-400 text-[10px]">(<%= tenant_short(@tenant_id) %>)</span>
-        <span class="text-[10px] text-gray-500 font-normal ml-1 group relative">
-          ℹ️
-          <span class="absolute bottom-full left-0 mb-1 hidden group-hover:block bg-gray-800 text-[10px] text-gray-300 px-2 py-1 rounded shadow-lg whitespace-nowrap z-10 border border-gray-700">
-            Quantized 1024-dim BGE-M3 summaries managed by local 0.6B model
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+          <span>🧠 WARM Memory Tier</span>
+          <span class="text-indigo-400 text-[10px]">(<%= tenant_short(@tenant_id) %>)</span>
+          <span class="text-[10px] text-gray-500 font-normal group relative cursor-help">
+            ℹ️
+            <span class="absolute bottom-full left-0 mb-1 hidden group-hover:block bg-gray-800 text-[10px] text-gray-300 px-2 py-1 rounded shadow-lg whitespace-nowrap z-10 border border-gray-700">
+              Quantized 1024-dim BGE-M3 summaries managed by local 0.6B model
+            </span>
           </span>
-        </span>
-        <%= if @active_bucket != "all" do %>
-          <span class="text-indigo-300 text-[10px] ml-1 bg-indigo-900/40 px-1.5 py-0.5 rounded">
-            <%= @active_bucket %>
-          </span>
+          <%= if @active_bucket != "all" do %>
+            <span class="text-indigo-300 text-[10px] bg-indigo-900/40 px-1.5 py-0.5 rounded">
+              <%= @active_bucket %>
+            </span>
+          <% end %>
+        </h2>
+        <%= if not @auto_consolidation_enabled and length(@memories) > 0 do %>
+          <button phx-click="force_consolidation"
+            class="text-[10px] bg-fuchsia-700 hover:bg-fuchsia-600 text-white px-2 py-0.5 rounded font-bold transition cursor-pointer active:scale-95 flex items-center gap-1">
+            <span>⚡</span>
+            <span><%= if @active_bucket == "all", do: "Sweep All", else: "Sweep: #{@active_bucket}" %></span>
+          </button>
         <% end %>
-      </h2>
+      </div>
       <div class="flex-1 overflow-y-auto space-y-3">
         <%= if has_flush_progress?(@flush_progress) do %>
           <div class="mb-2 bg-gray-800 rounded p-2 border border-blue-600">
