@@ -35,11 +35,13 @@ defmodule Librarian.Curator.Hybrid do
   end
 
   @doc """
-  Describe an image using the vision model endpoint.
+  Describe an image using the cloud vision model (Qwen-VL via DashScope).
+  The local LlamaCpp server (0.6B) has no vision capability, so this
+  routes to the cloud API.
   """
   @impl true
   def describe_image(image_data, opts) when is_binary(image_data) do
-    Librarian.Curator.LlamaCpp.describe_image(image_data, opts)
+    Librarian.Curator.QwenApi.describe_image(image_data, opts)
   end
 
   @doc """

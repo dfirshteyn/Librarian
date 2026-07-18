@@ -46,8 +46,8 @@ defmodule LibrarianWeb.Dashboard.Components.DrawerControls do
         ✨ Insights (<%= @insights_count %>)
       </button>
 
-      <div class="ml-auto text-[9px] text-gray-600">
-        Click to open panels
+      <div class="ml-auto text-sm font-bold text-gray-600">
+        ⮜ Click to open panels
       </div>
     </div>
     """
