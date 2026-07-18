@@ -106,21 +106,22 @@ defmodule Librarian.ParentSummarizer do
 
       # 4. Run through curator with a timeout wrapper so a hung model
       #    server doesn't block the pipeline indefinitely.
-      task = Task.Supervisor.async_nolink(Librarian.TaskSupervisor, fn ->
-        curator_impl = Librarian.Curator.resolve_curator(user_id, [])
+      task =
+        Task.Supervisor.async_nolink(Librarian.TaskSupervisor, fn ->
+          curator_impl = Librarian.Curator.resolve_curator(user_id, [])
 
-        case Librarian.Curator.summarize([payload], curator_impl) do
-          {:ok, curated} ->
-            # 5. Generate embedding
-            case Librarian.Curator.embed(curated.summary, curator_impl) do
-              {:ok, vec} -> {:ok, %{curated | embedding: vec}}
-              _ -> {:ok, curated}
-            end
+          case Librarian.Curator.summarize([payload], curator_impl) do
+            {:ok, curated} ->
+              # 5. Generate embedding
+              case Librarian.Curator.embed(curated.summary, curator_impl) do
+                {:ok, vec} -> {:ok, %{curated | embedding: vec}}
+                _ -> {:ok, curated}
+              end
 
-          {:error, reason} ->
-            {:error, reason}
-        end
-      end)
+            {:error, reason} ->
+              {:error, reason}
+          end
+        end)
 
       result =
         case Task.yield(task, @parent_synthesis_timeout) do
@@ -131,7 +132,11 @@ defmodule Librarian.ParentSummarizer do
             # Timed out — kill the task and return error
             Task.shutdown(task, :brutal_kill)
             require Logger
-            Logger.warning("[ParentSummarizer] Synthesis timed out for correlation_id=#{correlation_id}")
+
+            Logger.warning(
+              "[ParentSummarizer] Synthesis timed out for correlation_id=#{correlation_id}"
+            )
+
             {:error, :timeout}
         end
 

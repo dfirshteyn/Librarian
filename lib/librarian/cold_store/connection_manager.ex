@@ -80,6 +80,13 @@ defmodule Librarian.ColdStore.ConnectionManager do
       created_at TEXT DEFAULT (datetime('now')),
       deleted_at TEXT
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tenant_configs (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
     """
   ]
 
@@ -209,7 +216,10 @@ defmodule Librarian.ColdStore.ConnectionManager do
         pid
 
       {:error, reason} ->
-        Logger.warning("Failed to start SQLite connection for user #{user_id}: #{inspect(reason)}")
+        Logger.warning(
+          "Failed to start SQLite connection for user #{user_id}: #{inspect(reason)}"
+        )
+
         nil
     end
   end

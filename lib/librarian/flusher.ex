@@ -14,9 +14,17 @@ defmodule Librarian.Flusher do
   deduplication, contradiction resolution, and supersession is handled
   asynchronously by the tournament-bracket consolidator, which uses real
   cosine similarity (not a tag-heuristic threshold) to merge clusters.
+
+  ## Progress Reporting
+
+  Passes `progress_callback: fun` in opts to stream progress. The callback
+  receives `{bucket, processed, total, memory}` after each successful payload.
+  Broadcasts `{:flush_progress, bucket, processed, total}` via PubSub.
   """
 
   @max_flush_timeout 150_000
+
+  # Agent for tracking flush progress across processes
 
   @doc """
   Drain one HOT bucket's payloads and run each through the curator, storing
@@ -25,6 +33,9 @@ defmodule Librarian.Flusher do
   ("user_id:inbox"); the semantic bucket decision belongs to the curator
   at flush time, which is what lets the model override the old ingest-time
   keyword routing.
+
+  Passes `progress_callback: fun` in opts for incremental progress reporting.
+  The callback receives `{bucket, processed, total, memory}` after each success.
   """
   def flush_bucket(bucket, opts \\ []) do
     case Librarian.HotStore.drain(bucket) do
@@ -32,8 +43,15 @@ defmodule Librarian.Flusher do
         :empty
 
       payloads ->
-        require Logger
+        progress_callback = Keyword.get(opts, :progress_callback)
         user_id = bucket |> String.split(":") |> hd()
+
+        # Initialize progress tracking
+        if progress_callback do
+          Librarian.FlushProgressAgent.init_progress(user_id, bucket, length(payloads))
+        end
+
+        require Logger
         curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
 
         Logger.debug(
@@ -64,7 +82,9 @@ defmodule Librarian.Flusher do
                         {:error, embed_err}
                     end
 
-                  normalized = Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+                  normalized =
+                    Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+
                   warm_bucket = "#{user_id}:#{normalized}"
 
                   # Link the scrubbed raw capture to the memory so progressive
@@ -105,6 +125,16 @@ defmodule Librarian.Flusher do
                     Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
                   end
 
+                  # Report progress incrementally
+                  if progress_callback do
+                    Librarian.FlushProgressAgent.report_progress(
+                      user_id,
+                      bucket,
+                      memory,
+                      progress_callback
+                    )
+                  end
+
                   {:ok, memory}
 
                 {:error, reason} ->
@@ -122,9 +152,14 @@ defmodule Librarian.Flusher do
             max_concurrency: length(payloads)
           )
           |> Enum.map(fn
-            {:ok, result} -> result
+            {:ok, result} ->
+              result
+
             {:exit, reason} ->
-              Logger.error("[Flusher] Payload processing timed out for bucket=#{bucket}: #{inspect(reason)}")
+              Logger.error(
+                "[Flusher] Payload processing timed out for bucket=#{bucket}: #{inspect(reason)}"
+              )
+
               {:error, :timeout}
           end)
 
@@ -136,7 +171,8 @@ defmodule Librarian.Flusher do
           Librarian.Wal.truncate(bucket)
         end
 
-        Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket})
+        # Broadcast completion
+        Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, bucket, user_id})
 
         case succeeded do
           [] -> {:error, :all_failed}

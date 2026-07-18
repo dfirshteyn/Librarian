@@ -24,6 +24,7 @@ defmodule LibrarianWeb.DashboardLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "ingest")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush")
+      Phoenix.PubSub.subscribe(Librarian.PubSub, "flush_progress")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
       :timer.send_interval(2000, self(), :refresh_warm)
     end
@@ -37,6 +38,11 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:force_local, false)
      |> assign_memories(tenant_id)
      |> assign(:hot_counts, hot_counts(tenant_id))
+     |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tenant_id))
+     |> assign(
+       :auto_consolidation_enabled,
+       Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
+     )
      |> assign(:query, "")
      |> assign(:recall_results, nil)
      |> assign(:insights, Librarian.morning_briefing(20))
@@ -51,9 +57,10 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:council_pending, MapSet.new())
      |> assign(:publish_pending, MapSet.new())
      |> assign(:delegation_progress, %{})
+     |> assign(:flush_progress, %{})
+     |> assign(:new_memories, %{})
      |> assign(:publish_confirm_id, nil)
      |> assign(:publish_confirm_synthesis, nil)
-     |> assign(:auto_consolidation_enabled, Librarian.Consolidation.AutomationServer.enabled?())
      |> assign(:active_bucket, "all")
      |> assign(:show_terminal, false)
      |> assign(:show_graph, false)
@@ -66,14 +73,50 @@ defmodule LibrarianWeb.DashboardLive do
 
   @impl true
   def handle_info({:ingested, bucket, source, preview, user_id}, socket) do
-    entry = %{id: System.unique_integer([:positive, :monotonic]), bucket: bucket, source: source, preview: preview, user_id: user_id, at: Time.utc_now() |> Time.truncate(:second)}
+    entry = %{
+      id: System.unique_integer([:positive, :monotonic]),
+      bucket: bucket,
+      source: source,
+      preview: preview,
+      user_id: user_id,
+      at: Time.utc_now() |> Time.truncate(:second)
+    }
+
     tid = socket.assigns.tenant_id
-    {:noreply, socket |> stream_insert(:feed, entry, at: 0, limit: 50) |> assign(:feed_empty, false) |> assign(:hot_counts, hot_counts(tid))}
+
+    {:noreply,
+     socket
+     |> stream_insert(:feed, entry, at: 0, limit: 50)
+     |> assign(:feed_empty, false)
+     |> assign(:hot_counts, hot_counts(tid))}
   end
 
   def handle_info({:flushed, _bucket}, socket) do
     tid = socket.assigns.tenant_id
-    {:noreply, socket |> assign_memories(tid) |> assign(:hot_counts, hot_counts(tid))}
+
+    {:noreply,
+     socket
+     |> assign_memories(tid)
+     |> assign(:hot_counts, hot_counts(tid))
+     |> assign(:flush_progress, %{})
+     |> assign(:new_memories, %{})}
+  end
+
+  def handle_info({:flush_progress, user_id, bucket, processed, total, memory}, socket) do
+    # Check if this progress event is for the current tenant
+    if socket.assigns.tenant_id == user_id do
+      # Update flush progress for this bucket
+      flush_progress =
+        Map.put(socket.assigns.flush_progress, bucket, %{processed: processed, total: total})
+
+      # Mark this memory as new (for animation)
+      new_memories = Map.put(socket.assigns.new_memories, memory.id, true)
+
+      {:noreply,
+       socket |> assign(:flush_progress, flush_progress) |> assign(:new_memories, new_memories)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:auto_consolidation_toggled, new_val}, socket) do
@@ -82,7 +125,13 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info(:refresh_warm, socket) do
     tid = socket.assigns.tenant_id
-    {:noreply, socket |> assign_memories(tid) |> assign(:hot_counts, hot_counts(tid)) |> assign(:insights, Librarian.morning_briefing(20))}
+
+    {:noreply,
+     socket
+     |> assign_memories(tid)
+     |> assign(:hot_counts, hot_counts(tid))
+     |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tid))
+     |> assign(:insights, Librarian.morning_briefing(20))}
   end
 
   def handle_info(:refresh_graph, socket) do
@@ -92,21 +141,32 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info({:council_progress, id, stage, pct}, socket) do
     socket = update_progress(socket, :delegation_progress, id, stage, pct)
-    socket = if stage == :done or stage == :error do
-      socket |> update(:council_pending, &MapSet.delete(&1, id)) |> assign_memories(socket.assigns.tenant_id)
-    else
-      update(socket, :council_pending, &MapSet.put(&1, id))
-    end
+
+    socket =
+      if stage == :done or stage == :error do
+        socket
+        |> update(:council_pending, &MapSet.delete(&1, id))
+        |> assign_memories(socket.assigns.tenant_id)
+      else
+        update(socket, :council_pending, &MapSet.put(&1, id))
+      end
+
     {:noreply, socket}
   end
 
   def handle_info({:publish_progress, id, stage, pct}, socket) do
     socket = update_progress(socket, :delegation_progress, id, stage, pct)
-    socket = if stage == :done or stage == :error do
-      socket |> update(:publish_pending, &MapSet.delete(&1, id)) |> assign_memories(socket.assigns.tenant_id) |> update_public_count()
-    else
-      update(socket, :publish_pending, &MapSet.put(&1, id))
-    end
+
+    socket =
+      if stage == :done or stage == :error do
+        socket
+        |> update(:publish_pending, &MapSet.delete(&1, id))
+        |> assign_memories(socket.assigns.tenant_id)
+        |> update_public_count()
+      else
+        update(socket, :publish_pending, &MapSet.put(&1, id))
+      end
+
     {:noreply, socket}
   end
 
@@ -119,37 +179,123 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   @impl true
-  def handle_event("toggle_terminal", _params, socket), do: {:noreply, assign(socket, :show_terminal, not socket.assigns.show_terminal)}
-  def handle_event("toggle_graph", _params, socket), do: {:noreply, assign(socket, :show_graph, not socket.assigns.show_graph)}
-  def handle_event("toggle_insights", _params, socket), do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
-  def handle_event("set_graph_mode", %{"mode" => mode}, socket), do: {:noreply, assign(socket, :graph_mode, mode)}
+  def handle_event("toggle_terminal", _params, socket),
+    do: {:noreply, assign(socket, :show_terminal, not socket.assigns.show_terminal)}
+
+  def handle_event("toggle_graph", _params, socket),
+    do: {:noreply, assign(socket, :show_graph, not socket.assigns.show_graph)}
+
+  def handle_event("toggle_insights", _params, socket),
+    do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
+
+  def handle_event("set_graph_mode", %{"mode" => mode}, socket),
+    do: {:noreply, assign(socket, :graph_mode, mode)}
 
   @impl true
   def handle_event("structured_recall", %{"command" => cmd}, socket) do
     tid = socket.assigns.tenant_id
+
     case String.split(String.trim(cmd)) do
       ["/model" | qp] ->
-        q = Enum.join(qp, " "); r = Librarian.recall(q, tid, force_local: socket.assigns.force_local)
-        w = Enum.map(r.warm, fn m -> %{id: m.id, bucket: m.bucket, summary: m.summary, facts: m.facts || [], tags: m.tags || [], importance: m.importance, created: DateTime.to_iso8601(m.created_at), tier: "warm"} end)
-        c = Enum.map(r.cold, fn m -> %{id: m.id, bucket: m.bucket, summary: m.summary, facts: m.facts || [], tags: m.tags || [], importance: m.importance, created: m.created_at, tier: "cold"} end)
-        {:noreply, assign(socket, :structured_response, %{type: "model_recall", query: q, count: length(r.warm) + length(r.cold), memories: w ++ c})}
+        q = Enum.join(qp, " ")
+        r = Librarian.recall(q, tid, force_local: socket.assigns.force_local)
+
+        w =
+          Enum.map(r.warm, fn m ->
+            %{
+              id: m.id,
+              bucket: m.bucket,
+              summary: m.summary,
+              facts: m.facts || [],
+              tags: m.tags || [],
+              importance: m.importance,
+              created: DateTime.to_iso8601(m.created_at),
+              tier: "warm"
+            }
+          end)
+
+        c =
+          Enum.map(r.cold, fn m ->
+            %{
+              id: m.id,
+              bucket: m.bucket,
+              summary: m.summary,
+              facts: m.facts || [],
+              tags: m.tags || [],
+              importance: m.importance,
+              created: m.created_at,
+              tier: "cold"
+            }
+          end)
+
+        {:noreply,
+         assign(socket, :structured_response, %{
+           type: "model_recall",
+           query: q,
+           count: length(r.warm) + length(r.cold),
+           memories: w ++ c
+         })}
+
       ["/recall" | qp] ->
-        q = Enum.join(qp, " "); r = Librarian.recall(q, tid, force_local: socket.assigns.force_local)
-        {:noreply, assign(socket, :structured_response, %{type: "search_recall", query: q, warm_count: length(r.warm), related_count: length(r.related), cold_count: length(r.cold), warm: Enum.take(Enum.map(r.warm, & &1.summary), 5), related: Enum.take(Enum.map(r.related, & &1.summary), 3), cold: Enum.take(Enum.map(r.cold, & &1.summary), 3)})}
+        q = Enum.join(qp, " ")
+        r = Librarian.recall(q, tid, force_local: socket.assigns.force_local)
+
+        {:noreply,
+         assign(socket, :structured_response, %{
+           type: "search_recall",
+           query: q,
+           warm_count: length(r.warm),
+           related_count: length(r.related),
+           cold_count: length(r.cold),
+           warm: Enum.take(Enum.map(r.warm, & &1.summary), 5),
+           related: Enum.take(Enum.map(r.related, & &1.summary), 3),
+           cold: Enum.take(Enum.map(r.cold, & &1.summary), 3)
+         })}
+
       ["/trace" | qp] ->
-        q = Enum.join(qp, " "); r = Librarian.Ancestry.progressive_recall(q, tid, force_local: socket.assigns.force_local)
-        {:noreply, assign(socket, :structured_response, %{type: "trace_recall", query: q, count: length(r.results), results: r.results})}
+        q = Enum.join(qp, " ")
+        r = Librarian.Ancestry.progressive_recall(q, tid, force_local: socket.assigns.force_local)
+
+        {:noreply,
+         assign(socket, :structured_response, %{
+           type: "trace_recall",
+           query: q,
+           count: length(r.results),
+           results: r.results
+         })}
+
       ["/ancestry" | id_parts] ->
         id_str = Enum.join(id_parts, " ")
-        resp = case Integer.parse(String.trim(id_str)) do
-          {mid, ""} -> %{type: "ancestry_recall", memory_id: mid, depth: 5, tree: Librarian.Ancestry.get_tree(mid, tid)}
-          _ -> %{type: "error", message: "Invalid /ancestry id (expected integer)"}
-        end
+
+        resp =
+          case Integer.parse(String.trim(id_str)) do
+            {mid, ""} ->
+              %{
+                type: "ancestry_recall",
+                memory_id: mid,
+                depth: 5,
+                tree: Librarian.Ancestry.get_tree(mid, tid)
+              }
+
+            _ ->
+              %{type: "error", message: "Invalid /ancestry id (expected integer)"}
+          end
+
         {:noreply, assign(socket, :structured_response, resp)}
+
       ["/status"] ->
-        {:noreply, assign(socket, :structured_response, %{type: "status", data: Map.delete(Librarian.status(tid), [:user_id])})}
+        {:noreply,
+         assign(socket, :structured_response, %{
+           type: "status",
+           data: Map.delete(Librarian.status(tid), [:user_id])
+         })}
+
       _ ->
-        {:noreply, assign(socket, :structured_response, %{type: "error", message: "Unknown command. Use /model [query], /recall [query], or /status"})}
+        {:noreply,
+         assign(socket, :structured_response, %{
+           type: "error",
+           message: "Unknown command. Use /model [query], /recall [query], or /status"
+         })}
     end
   end
 
@@ -158,135 +304,346 @@ defmodule LibrarianWeb.DashboardLive do
     r = Librarian.recall(q, socket.assigns.tenant_id, force_local: socket.assigns.force_local)
     {:noreply, assign(socket, :recall_results, %{query: q, warm: r.warm, related: r.related})}
   end
-  def handle_event("recall", _params, socket), do: {:noreply, assign(socket, :recall_results, nil)}
+
+  def handle_event("recall", _params, socket),
+    do: {:noreply, assign(socket, :recall_results, nil)}
 
   def handle_event("nightly_pass", _params, socket) do
     tid = socket.assigns.tenant_id
-    Task.start(fn -> Flusher.flush_all(tid, Application.get_env(:librarian, :parallel_flush_max_concurrency, 1), force_local: socket.assigns.force_local); Flusher.nightly_pass(); Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all}) end)
+
+    Task.start(fn ->
+      Flusher.flush_all(tid, Application.get_env(:librarian, :parallel_flush_max_concurrency, 1),
+        force_local: socket.assigns.force_local
+      )
+
+      Flusher.nightly_pass()
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all})
+    end)
+
     {:noreply, put_flash(socket, :info, "Nightly pass started (async)")}
   end
 
-  def handle_event("toggle_force_local", _params, socket), do: {:noreply, assign(socket, :force_local, not socket.assigns.force_local)}
+  def handle_event("toggle_force_local", _params, socket),
+    do: {:noreply, assign(socket, :force_local, not socket.assigns.force_local)}
 
   def handle_event("force_consolidation", _params, socket) do
-    tid = socket.assigns.tenant_id; ab = socket.assigns.active_bucket
-    Task.start(fn -> Librarian.Consolidator.consolidate(tid, force_local: socket.assigns.force_local, bucket_filter: (if ab == "all", do: nil, else: ab)); Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid}) end)
-    {:noreply, put_flash(socket, :info, "Consolidation sweep started for #{if ab == "all", do: tid, else: "#{tid}:#{ab} (bucket-scoped)"}")}
+    tid = socket.assigns.tenant_id
+    ab = socket.assigns.active_bucket
+
+    Task.start(fn ->
+      Librarian.Consolidator.consolidate(tid,
+        force_local: socket.assigns.force_local,
+        bucket_filter: if(ab == "all", do: nil, else: ab)
+      )
+
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
+    end)
+
+    {:noreply,
+     put_flash(
+       socket,
+       :info,
+       "Consolidation sweep started for #{if ab == "all", do: tid, else: "#{tid}:#{ab} (bucket-scoped)"}"
+     )}
   end
 
-  def handle_event("set_active_bucket", %{"bucket" => bucket}, socket), do: {:noreply, assign(socket, :active_bucket, bucket)}
+  def handle_event("set_active_bucket", %{"bucket" => bucket}, socket),
+    do: {:noreply, assign(socket, :active_bucket, bucket)}
 
   def handle_event("rebucket_memory", %{"id" => id, "bucket" => new_bucket}, socket) do
     mid = String.to_integer(id)
+
     case Librarian.WarmStore.get(mid) do
-      nil -> {:noreply, put_flash(socket, :error, "Memory not found")}
-      %{locked: true} -> {:noreply, put_flash(socket, :error, "Memory is locked")}
-      %{published: true} -> {:noreply, put_flash(socket, :error, "Published memories cannot be re-bucketed")}
-      _ -> Librarian.WarmStore.update(mid, %{bucket: "#{socket.assigns.tenant_id}:#{new_bucket}"}); {:noreply, socket |> assign_memories(socket.assigns.tenant_id) |> put_flash(:info, "Moved to #{new_bucket}")}
+      nil ->
+        {:noreply, put_flash(socket, :error, "Memory not found")}
+
+      %{locked: true} ->
+        {:noreply, put_flash(socket, :error, "Memory is locked")}
+
+      %{published: true} ->
+        {:noreply, put_flash(socket, :error, "Published memories cannot be re-bucketed")}
+
+      _ ->
+        Librarian.WarmStore.update(mid, %{bucket: "#{socket.assigns.tenant_id}:#{new_bucket}"})
+
+        {:noreply,
+         socket
+         |> assign_memories(socket.assigns.tenant_id)
+         |> put_flash(:info, "Moved to #{new_bucket}")}
     end
   end
 
   def handle_event("delegate_council", %{"id" => id}, socket) do
     mid = String.to_integer(id)
+
     if MapSet.member?(socket.assigns.council_pending, mid) do
       {:noreply, socket}
     else
       socket = update(socket, :council_pending, &MapSet.put(&1, mid))
-      Task.start(fn -> case Librarian.Delegation.delegate_to_council(mid, socket.assigns.tenant_id) do {:ok, _} -> :ok; {:error, reason} -> Phoenix.PubSub.broadcast(Librarian.PubSub, "delegation:#{socket.assigns.tenant_id}", {:council_progress, mid, :error, 0}); Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", flash: %{error: "Delegate failed: #{inspect(reason)}"}) end end)
+
+      Task.start(fn ->
+        case Librarian.Delegation.delegate_to_council(mid, socket.assigns.tenant_id) do
+          {:ok, _} ->
+            :ok
+
+          {:error, reason} ->
+            Phoenix.PubSub.broadcast(
+              Librarian.PubSub,
+              "delegation:#{socket.assigns.tenant_id}",
+              {:council_progress, mid, :error, 0}
+            )
+
+            Phoenix.LiveView.send_update(__MODULE__,
+              id: "dashboard",
+              flash: %{error: "Delegate failed: #{inspect(reason)}"}
+            )
+        end
+      end)
+
       {:noreply, socket}
     end
   end
 
   def handle_event("publish_memory", %{"id" => id}, socket) do
     mid = String.to_integer(id)
+
     if MapSet.member?(socket.assigns.publish_pending, mid) do
       {:noreply, socket}
     else
       mem = Librarian.WarmStore.get(mid)
+
       if mem && mem.council && is_binary(mem.council[:synthesis]) do
-        {:noreply, socket |> assign(:publish_confirm_id, mid) |> assign(:publish_confirm_synthesis, mem.council[:synthesis])}
+        {:noreply,
+         socket
+         |> assign(:publish_confirm_id, mid)
+         |> assign(:publish_confirm_synthesis, mem.council[:synthesis])}
       else
         {:noreply, put_flash(socket, :error, "Memory has no Council synthesis — delegate first.")}
       end
     end
   end
 
-  def handle_event("cancel_publish", _params, socket), do: {:noreply, socket |> assign(:publish_confirm_id, nil) |> assign(:publish_confirm_synthesis, nil)}
+  def handle_event("cancel_publish", _params, socket),
+    do:
+      {:noreply,
+       socket |> assign(:publish_confirm_id, nil) |> assign(:publish_confirm_synthesis, nil)}
 
   def handle_event("confirm_publish", %{"id" => id}, socket) do
-    mid = String.to_integer(id); tid = socket.assigns.tenant_id
-    socket = socket |> assign(:publish_confirm_id, nil) |> assign(:publish_confirm_synthesis, nil) |> update(:publish_pending, &MapSet.put(&1, mid))
-    Task.start(fn -> case Librarian.Delegation.publish_memory(mid, tid) do {:ok, hash} -> Phoenix.PubSub.broadcast(Librarian.PubSub, "delegation:#{tid}", {:publish_progress, mid, :done, 100}); Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", flash: %{info: "Published (#{String.slice(hash, 0, 12)})"}); {:error, reason} -> Phoenix.PubSub.broadcast(Librarian.PubSub, "delegation:#{tid}", {:publish_progress, mid, :error, 0}); Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", flash: %{error: "Publish failed: #{inspect(reason)}"}) end end)
+    mid = String.to_integer(id)
+    tid = socket.assigns.tenant_id
+
+    socket =
+      socket
+      |> assign(:publish_confirm_id, nil)
+      |> assign(:publish_confirm_synthesis, nil)
+      |> update(:publish_pending, &MapSet.put(&1, mid))
+
+    Task.start(fn ->
+      case Librarian.Delegation.publish_memory(mid, tid) do
+        {:ok, hash} ->
+          Phoenix.PubSub.broadcast(
+            Librarian.PubSub,
+            "delegation:#{tid}",
+            {:publish_progress, mid, :done, 100}
+          )
+
+          Phoenix.LiveView.send_update(__MODULE__,
+            id: "dashboard",
+            flash: %{info: "Published (#{String.slice(hash, 0, 12)})"}
+          )
+
+        {:error, reason} ->
+          Phoenix.PubSub.broadcast(
+            Librarian.PubSub,
+            "delegation:#{tid}",
+            {:publish_progress, mid, :error, 0}
+          )
+
+          Phoenix.LiveView.send_update(__MODULE__,
+            id: "dashboard",
+            flash: %{error: "Publish failed: #{inspect(reason)}"}
+          )
+      end
+    end)
+
     {:noreply, socket}
   end
 
-  def handle_event("manual_ingest", %{"text" => text, "bucket" => bucket}, socket) when byte_size(text) > 0 do
-    case Librarian.IngestRouter.process(%{"source" => "web_ui", "raw_text" => text, "hint_tags" => [], "metadata" => %{}}, socket.assigns.tenant_id) do
-      {:ok, _} -> {:noreply, socket |> assign(:ingest_text, "") |> put_flash(:info, "Ingested to #{bucket}")}
-      {:ok, _, cc} -> {:noreply, socket |> assign(:ingest_text, "") |> put_flash(:info, "Ingested (auto-chunked into #{cc} pieces) to #{bucket}")}
-      {:error, reason} -> {:noreply, put_flash(socket, :error, "Ingest failed: #{inspect(reason)}")}
+  def handle_event("manual_ingest", %{"text" => text, "bucket" => bucket}, socket)
+      when byte_size(text) > 0 do
+    case Librarian.IngestRouter.process(
+           %{"source" => "web_ui", "raw_text" => text, "hint_tags" => [], "metadata" => %{}},
+           socket.assigns.tenant_id
+         ) do
+      {:ok, _} ->
+        {:noreply,
+         socket |> assign(:ingest_text, "") |> put_flash(:info, "Ingested to #{bucket}")}
+
+      {:ok, _, cc} ->
+        {:noreply,
+         socket
+         |> assign(:ingest_text, "")
+         |> put_flash(:info, "Ingested (auto-chunked into #{cc} pieces) to #{bucket}")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Ingest failed: #{inspect(reason)}")}
     end
   end
-  def handle_event("manual_ingest", _params, socket), do: {:noreply, put_flash(socket, :error, "Text required")}
+
+  def handle_event("manual_ingest", _params, socket),
+    do: {:noreply, put_flash(socket, :error, "Text required")}
 
   def handle_event("file_upload", params, socket) do
     case params["file"] do
       %Plug.Upload{} = upload ->
-        fc = File.read!(upload.path); mt = Librarian.Utils.FileDetector.mime_type(upload.filename)
-        {rt, fd} = if String.starts_with?(mt, "text/") or mt == "application/json", do: {fc, nil}, else: {nil, Base.encode64(fc)}
-        case Librarian.IngestRouter.process(%{"source" => "file_upload", "raw_text" => rt, "file_data" => fd, "original_filename" => upload.filename, "file_type" => mt, "hint_tags" => []}, socket.assigns.tenant_id) do
-          {:ok, _} -> {:noreply, socket |> assign(:ingest_text, "") |> put_flash(:info, "File uploaded")}
-          {:ok, _, _} -> {:noreply, socket |> assign(:ingest_text, "") |> put_flash(:info, "File uploaded (chunked)")}
-          {:error, _} -> {:noreply, put_flash(socket, :error, "Upload failed")}
+        fc = File.read!(upload.path)
+        mt = Librarian.Utils.FileDetector.mime_type(upload.filename)
+
+        {rt, fd} =
+          if String.starts_with?(mt, "text/") or mt == "application/json",
+            do: {fc, nil},
+            else: {nil, Base.encode64(fc)}
+
+        case Librarian.IngestRouter.process(
+               %{
+                 "source" => "file_upload",
+                 "raw_text" => rt,
+                 "file_data" => fd,
+                 "original_filename" => upload.filename,
+                 "file_type" => mt,
+                 "hint_tags" => []
+               },
+               socket.assigns.tenant_id
+             ) do
+          {:ok, _} ->
+            {:noreply, socket |> assign(:ingest_text, "") |> put_flash(:info, "File uploaded")}
+
+          {:ok, _, _} ->
+            {:noreply,
+             socket |> assign(:ingest_text, "") |> put_flash(:info, "File uploaded (chunked)")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Upload failed")}
         end
-      _ -> {:noreply, put_flash(socket, :error, "No file selected")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No file selected")}
     end
   end
 
   def handle_event("toggle_memory", %{"id" => id}, socket) do
     i = String.to_integer(id)
-    {:noreply, assign(socket, :expanded_memories, if(MapSet.member?(socket.assigns.expanded_memories, i), do: MapSet.delete(socket.assigns.expanded_memories, i), else: MapSet.put(socket.assigns.expanded_memories, i)))}
+
+    {:noreply,
+     assign(
+       socket,
+       :expanded_memories,
+       if(MapSet.member?(socket.assigns.expanded_memories, i),
+         do: MapSet.delete(socket.assigns.expanded_memories, i),
+         else: MapSet.put(socket.assigns.expanded_memories, i)
+       )
+     )}
   end
 
   def handle_event("open_ancestry", %{"id" => id}, socket) do
-    mid = String.to_integer(id); tid = socket.assigns.tenant_id
-    {:noreply, assign(socket, ancestry_memory_id: mid, ancestry_tree: Enum.map(Librarian.ColdStore.get_memory_ancestry(to_string(mid), tid), fn rel -> Map.merge(rel, %{source_raw: raw_for(rel.source_id), target_raw: raw_for(rel.target_id)}) end))}
+    mid = String.to_integer(id)
+    tid = socket.assigns.tenant_id
+
+    {:noreply,
+     assign(socket,
+       ancestry_memory_id: mid,
+       ancestry_tree:
+         Enum.map(Librarian.ColdStore.get_memory_ancestry(to_string(mid), tid), fn rel ->
+           Map.merge(rel, %{
+             source_raw: raw_for(rel.source_id),
+             target_raw: raw_for(rel.target_id)
+           })
+         end)
+     )}
   end
 
-  def handle_event("close_ancestry", _params, socket), do: {:noreply, assign(socket, ancestry_memory_id: nil, ancestry_tree: [])}
+  def handle_event("close_ancestry", _params, socket),
+    do: {:noreply, assign(socket, ancestry_memory_id: nil, ancestry_tree: [])}
 
   def handle_event("seed_demo", _params, socket) do
     if socket.assigns.demo_running do
       {:noreply, socket}
     else
-      Task.start(fn -> Librarian.Demo.seed_sandbox(socket.assigns.tenant_id, 10); Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", demo_running: false) end)
+      Task.start(fn ->
+        Librarian.Demo.seed_sandbox(socket.assigns.tenant_id, 10)
+        Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", demo_running: false)
+      end)
+
       {:noreply, socket |> assign(:demo_running, true) |> assign(:demo_total, 10)}
     end
   end
 
   def handle_event("toggle_auto_consolidation", _params, socket) do
-    nv = not socket.assigns.auto_consolidation_enabled; Librarian.Consolidation.AutomationServer.set_enabled(nv)
-    Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:auto_consolidation_toggled, nv}); {:noreply, socket}
+    nv = not socket.assigns.auto_consolidation_enabled
+    Librarian.Consolidation.AutomationServer.set_enabled(socket.assigns.tenant_id, nv)
+    Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:auto_consolidation_toggled, nv})
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_auto_flush", _params, socket) do
+    nv = not socket.assigns.auto_flush_enabled
+    Librarian.FlushQueue.set_enabled(socket.assigns.tenant_id, nv)
+    {:noreply, socket |> assign(:auto_flush_enabled, nv)}
+  end
+
+  def handle_event("flush_all_buckets", _params, socket) do
+    tid = socket.assigns.tenant_id
+
+    Task.start(fn ->
+      # Flush with progress broadcast via FlushProgressAgent
+      Flusher.flush_all(tid, 1,
+        progress_callback: &Librarian.FlushProgressAgent.report_progress/4
+      )
+
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
+    end)
+
+    {:noreply,
+     socket
+     |> assign(:flush_progress, %{})
+     |> put_flash(:info, "Flush triggered")}
   end
 
   @impl true
   def handle_event(event, params, socket) do
-    Logger.debug("Unhandled event #{inspect(event)} with params #{inspect(params)}"); {:noreply, socket}
+    Logger.debug("Unhandled event #{inspect(event)} with params #{inspect(params)}")
+    {:noreply, socket}
   end
 
   defp raw_for(id_str) when is_binary(id_str) do
     case Integer.parse(id_str) do
-      {int_id, ""} -> case Librarian.WarmStore.get(int_id) do nil -> nil; mem -> mem.raw_original end
-      _ -> nil
+      {int_id, ""} ->
+        case Librarian.WarmStore.get(int_id) do
+          nil -> nil
+          mem -> mem.raw_original
+        end
+
+      _ ->
+        nil
     end
   end
+
   defp raw_for(_), do: nil
 
-  defp assign_memories(socket, tid), do: socket |> assign(:memories, WarmStore.all_for_user(tid) |> Enum.reject(& &1.superseded_by)) |> assign(:superseded_count, WarmStore.superseded_count_for_user(tid)) |> assign(:cold_count, Librarian.ColdStore.count(tid))
+  defp assign_memories(socket, tid),
+    do:
+      socket
+      |> assign(:memories, WarmStore.all_for_user(tid) |> Enum.reject(& &1.superseded_by))
+      |> assign(:superseded_count, WarmStore.superseded_count_for_user(tid))
+      |> assign(:cold_count, Librarian.ColdStore.count(tid))
 
   defp hot_counts(tid) do
     p = tid <> ":"
-    HotStore.buckets() |> Enum.filter(&String.starts_with?(&1, p)) |> Enum.map(fn b -> {b, HotStore.count(b)} end) |> Enum.into(%{})
+
+    HotStore.buckets()
+    |> Enum.filter(&String.starts_with?(&1, p))
+    |> Enum.map(fn b -> {b, HotStore.count(b)} end)
+    |> Enum.into(%{})
   end
 
   attr(:memory_id, :integer, required: true)
@@ -311,13 +668,26 @@ defmodule LibrarianWeb.DashboardLive do
 
   @impl true
   def render(assigns) do
-    bucket_counts = assigns.memories |> Enum.group_by(fn m -> m.bucket |> String.split(":") |> List.last() end) |> Map.new(fn {b, ms} -> {b, length(ms)} end)
-    filtered = if assigns.active_bucket == "all", do: assigns.memories, else: Enum.filter(assigns.memories, fn m -> (m.bucket |> String.split(":") |> List.last()) == assigns.active_bucket end)
-    assigns = assigns |> assign(:bucket_counts, bucket_counts) |> assign(:filtered_memories, filtered)
+    bucket_counts =
+      assigns.memories
+      |> Enum.group_by(fn m -> m.bucket |> String.split(":") |> List.last() end)
+      |> Map.new(fn {b, ms} -> {b, length(ms)} end)
+
+    filtered =
+      if assigns.active_bucket == "all",
+        do: assigns.memories,
+        else:
+          Enum.filter(assigns.memories, fn m ->
+            m.bucket |> String.split(":") |> List.last() == assigns.active_bucket
+          end)
+
+    assigns =
+      assigns |> assign(:bucket_counts, bucket_counts) |> assign(:filtered_memories, filtered)
+
     ~H"""
     <div class="h-screen bg-gray-950 text-gray-100 font-mono p-4 flex flex-col overflow-hidden">
       <.header tenant_id={@tenant_id} tier={@tier} force_local={@force_local} demo_running={@demo_running} />
-      <.control_strip auto_consolidation_enabled={@auto_consolidation_enabled} active_bucket={@active_bucket} tier={@tier} force_local={@force_local} warm_count={length(@memories)} cold_count={@cold_count} />
+      <.control_strip auto_consolidation_enabled={@auto_consolidation_enabled} auto_flush_enabled={@auto_flush_enabled} hot_counts={@hot_counts} active_bucket={@active_bucket} tier={@tier} force_local={@force_local} warm_count={length(@memories)} cold_count={@cold_count} />
       <div class="flex gap-2 mb-3 flex-wrap items-center">
         <span class="text-[10px] text-gray-500 uppercase tracking-widest mr-1">Lanes</span>
         <button phx-click="set_active_bucket" phx-value-bucket="all" class={"text-[11px] px-2.5 py-1 rounded-full font-bold border transition " <> if(@active_bucket == "all", do: "bg-indigo-600 border-indigo-400 text-white", else: "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700")}>📋 All (<%= length(@memories) %>)</button>
@@ -328,8 +698,8 @@ defmodule LibrarianWeb.DashboardLive do
         <% end %>
       </div>
       <div class="grid grid-cols-2 gap-4 flex-1 min-h-0">
-        <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} />
-        <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} />
+        <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} hot_counts={@hot_counts} auto_flush_enabled={@auto_flush_enabled} flush_progress={@flush_progress} />
+        <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} flush_progress={@flush_progress} new_memories={@new_memories} />
       </div>
       <.drawer_controls show_terminal={@show_terminal} show_graph={@show_graph} show_insights={@show_insights} private_count={@private_count} public_count={@public_count} insights_count={@insights_drawer_count} graph_mode={@graph_mode} />
       <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} show={@show_terminal} />
@@ -396,8 +766,14 @@ defmodule LibrarianWeb.DashboardLive do
   defp bucket_icon("finance"), do: "💰"
   defp bucket_icon(_), do: "📂"
 
-  defp insight_summary(%{"kind" => "supersession"} = m), do: "Superseded: \"#{m["old_summary"]}\" → \"#{m["new_summary"]}\""
-  defp insight_summary(%{"kind" => "deep_supersession"} = m), do: "Qwen flagged contradiction: memory ##{m["old_id"]} superseded by ##{m["new_id"]}"
-  defp insight_summary(%{"kind" => "deep_cross_connection"} = m), do: "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
+  defp insight_summary(%{"kind" => "supersession"} = m),
+    do: "Superseded: \"#{m["old_summary"]}\" → \"#{m["new_summary"]}\""
+
+  defp insight_summary(%{"kind" => "deep_supersession"} = m),
+    do: "Qwen flagged contradiction: memory ##{m["old_id"]} superseded by ##{m["new_id"]}"
+
+  defp insight_summary(%{"kind" => "deep_cross_connection"} = m),
+    do: "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
+
   defp insight_summary(m), do: inspect(m)
 end

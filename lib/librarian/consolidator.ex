@@ -34,7 +34,7 @@ defmodule Librarian.Consolidator do
       |> then(fn mems ->
         if bucket_filter do
           Enum.filter(mems, fn m ->
-            (m.bucket |> String.split(":") |> List.last()) == bucket_filter
+            m.bucket |> String.split(":") |> List.last() == bucket_filter
           end)
         else
           mems

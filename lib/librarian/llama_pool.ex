@@ -65,7 +65,9 @@ defmodule Librarian.LlamaPool do
   Returns the current state of all pools — useful for dashboard display
   of real-time slot usage.
   """
-  @spec status(server :: GenServer.name()) :: %{required(String.t()) => %{available: non_neg_integer(), waiting: non_neg_integer()}}
+  @spec status(server :: GenServer.name()) :: %{
+          required(String.t()) => %{available: non_neg_integer(), waiting: non_neg_integer()}
+        }
   def status(server \\ __MODULE__) do
     GenServer.call(server, :status)
   end
@@ -85,9 +87,10 @@ defmodule Librarian.LlamaPool do
 
     # Build initial state: one pool entry per known URL, plus a catch-all
     # for any unconfigured URL (defaults to 4).
-    pools = Map.new(defaults, fn {url, max} ->
-      {url, %{max: max, available: max, waiting: :queue.new()}}
-    end)
+    pools =
+      Map.new(defaults, fn {url, max} ->
+        {url, %{max: max, available: max, waiting: :queue.new()}}
+      end)
 
     {:ok, %{pools: pools, catch_all_max: 4}}
   end

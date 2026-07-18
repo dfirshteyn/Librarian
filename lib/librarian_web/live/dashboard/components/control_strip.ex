@@ -2,6 +2,8 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
   use Phoenix.Component
 
   attr(:auto_consolidation_enabled, :boolean, required: true)
+  attr(:auto_flush_enabled, :boolean, required: true)
+  attr(:hot_counts, :map, required: true)
   attr(:active_bucket, :string, required: true)
   attr(:tier, :atom, default: :anon)
   attr(:force_local, :boolean, default: false)
@@ -24,6 +26,14 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
         <%= if @auto_consolidation_enabled, do: "⚙️ Auto-Consolidation: ON", else: "⚙️ Auto-Consolidation: OFF" %>
       </button>
 
+      <button phx-click="toggle_auto_flush"
+        class={"text-xs px-2.5 py-1 rounded font-bold transition border " <>
+          if(@auto_flush_enabled,
+            do: "bg-blue-600 hover:bg-blue-500 text-white border-blue-400",
+            else: "bg-gray-800 hover:bg-gray-700 text-gray-400 border-gray-600")}>
+        <%= if @auto_flush_enabled, do: "🧼 Auto-Flush: ON", else: "🧼 Auto-Flush: OFF" %>
+      </button>
+
       <button phx-click="nightly_pass"
         class="text-xs bg-purple-700 hover:bg-purple-600 text-white px-2.5 py-1 rounded font-bold transition">
         🔮 Run Nightly Pass
@@ -31,6 +41,10 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
 
       <div class="w-px h-5 bg-gray-700 mx-1"></div>
 
+      <div class="flex items-center gap-2 bg-gray-800 rounded px-2 py-1">
+        <span class="text-[10px] text-gray-300">🔥 HOT</span>
+        <span class="text-[10px] font-bold text-white"><%= total_hot(@hot_counts) %></span>
+      </div>
       <div class="flex items-center gap-2 bg-gray-800 rounded px-2 py-1">
         <span class="text-[10px] text-gray-300">WARM</span>
         <span class="text-[10px] font-bold text-white"><%= @warm_count %></span>
@@ -57,5 +71,9 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
       </div>
     </div>
     """
+  end
+
+  defp total_hot(hot_counts) do
+    hot_counts |> Map.values() |> Enum.reduce(0, &(&1 + &2))
   end
 end

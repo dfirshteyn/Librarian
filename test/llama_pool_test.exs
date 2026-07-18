@@ -44,6 +44,7 @@ defmodule Librarian.LlamaPoolTest do
       for _i <- 1..4 do
         Librarian.LlamaPool.checkin(url_a, pool)
       end
+
       Librarian.LlamaPool.checkin(url_b, pool)
     end
   end
@@ -78,7 +79,9 @@ defmodule Librarian.LlamaPoolTest do
   end
 
   describe "concurrency limiting" do
-    test "checkout blocks when all slots are taken, and unblocks when a slot is freed", %{pool: pool} do
+    test "checkout blocks when all slots are taken, and unblocks when a slot is freed", %{
+      pool: pool
+    } do
       url = "http://localhost:6000/v1"
 
       # Take all 4 slots

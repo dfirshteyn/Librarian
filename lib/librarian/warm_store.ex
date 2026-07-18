@@ -72,7 +72,11 @@ defmodule Librarian.WarmStore do
     file_type = Keyword.get(opts, :file_type)
     stored_path = Keyword.get(opts, :stored_path)
     dimensions = Keyword.get(opts, :dimensions)
-    GenServer.call(__MODULE__, {:put, bucket, result, correlation_id, raw_original, file_type, stored_path, dimensions})
+
+    GenServer.call(
+      __MODULE__,
+      {:put, bucket, result, correlation_id, raw_original, file_type, stored_path, dimensions}
+    )
   end
 
   def get(id) do

@@ -25,23 +25,27 @@ defmodule Librarian.Consolidation.AutomationServer do
   def init(_opts) do
     schedule_poll()
     schedule_daily_sweep()
-    {:ok, %{in_progress: MapSet.new(), monitors: %{}, enabled: true}}
+    {:ok, %{in_progress: MapSet.new(), monitors: %{}, enabled: %{}}}
   end
 
   # ── Public API ─────────────────────────────────────────────────────
 
   @doc """
-  Enable or disable auto-consolidation.
+  Enable or disable auto-consolidation for a specific user.
   """
-  def set_enabled(enabled) when is_boolean(enabled) do
-    GenServer.call(__MODULE__, {:set_enabled, enabled})
+  def set_enabled(user_id, enabled) when is_binary(user_id) and is_boolean(enabled) do
+    GenServer.call(__MODULE__, {:set_enabled, user_id, enabled})
   end
 
   @doc """
-  Check if auto-consolidation is enabled.
+  Check if auto-consolidation is enabled for a user.
+  Returns `true` if enabled (default), `false` if disabled.
   """
-  def enabled? do
-    GenServer.call(__MODULE__, :enabled?)
+  def enabled?(user_id) when is_binary(user_id) do
+    case GenServer.call(__MODULE__, {:enabled?, user_id}) do
+      nil -> true
+      val -> val
+    end
   end
 
   @doc """
@@ -55,13 +59,14 @@ defmodule Librarian.Consolidation.AutomationServer do
   # ── Call handlers ──────────────────────────────────────────────────
 
   @impl true
-  def handle_call({:set_enabled, enabled}, _from, state) do
-    {:reply, :ok, Map.put(state, :enabled, enabled)}
+  def handle_call({:set_enabled, user_id, enabled}, _from, state) do
+    enabled_map = Map.put(state.enabled, user_id, enabled)
+    {:reply, :ok, %{state | enabled: enabled_map}}
   end
 
   @impl true
-  def handle_call(:enabled?, _from, state) do
-    {:reply, Map.get(state, :enabled, true), state}
+  def handle_call({:enabled?, user_id}, _from, state) do
+    {:reply, Map.get(state.enabled, user_id), state}
   end
 
   @impl true
@@ -69,8 +74,14 @@ defmodule Librarian.Consolidation.AutomationServer do
     if MapSet.member?(in_progress, user_id) do
       {:reply, {:error, :already_in_progress}, state}
     else
-      {state, _task} = spawn_consolidation(user_id, state)
-      {:reply, {:ok, :started}, state}
+      # Check if auto-consolidation is enabled for this user (check state directly)
+      user_enabled = Map.get(state.enabled, user_id)
+      if user_enabled != false do
+        {state, _task} = spawn_consolidation(user_id, state)
+        {:reply, {:ok, :started}, state}
+      else
+        {:reply, {:error, :disabled}, state}
+      end
     end
   end
 
@@ -78,12 +89,8 @@ defmodule Librarian.Consolidation.AutomationServer do
 
   @impl true
   def handle_info(:poll, state) do
-    state =
-      if Map.get(state, :enabled, true) do
-        check_and_spawn(state)
-      else
-        state
-      end
+    # Poll respect per-user enabled states - check_and_spawn already does this
+    state = check_and_spawn(state)
     schedule_poll()
     {:noreply, state}
   end

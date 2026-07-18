@@ -19,6 +19,8 @@ defmodule Librarian.Application do
         Librarian.LlamaPool,
         Librarian.ChunkTracker,
         Librarian.ParentSummarizer,
+        Librarian.FlushProgressAgent,
+        Librarian.FlushQueue,
         Librarian.Consolidation.AutomationServer,
         LibrarianWeb.Endpoint
       ]

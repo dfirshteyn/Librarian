@@ -92,23 +92,22 @@ defmodule Librarian.ColdStore do
       if is_nil(conn) do
         {:ok, %{outgoing: [], incoming: []}}
       else
-
         outgoing =
           case Exqlite.query(
-                conn,
-                "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC",
-                [memory_id]
-              ) do
+                 conn,
+                 "SELECT * FROM memory_relationships WHERE source_id = ?1 ORDER BY created_at DESC",
+                 [memory_id]
+               ) do
             {:ok, %{rows: rows}} -> rows_to_relationships(rows)
             _ -> []
           end
 
         incoming =
           case Exqlite.query(
-                conn,
-                "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC",
-                [memory_id]
-              ) do
+                 conn,
+                 "SELECT * FROM memory_relationships WHERE target_id = ?1 ORDER BY created_at DESC",
+                 [memory_id]
+               ) do
             {:ok, %{rows: rows}} -> rows_to_relationships(rows)
             _ -> []
           end

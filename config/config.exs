@@ -22,9 +22,12 @@ config :librarian,
   # Per-server concurrency limits for local llama.cpp model servers.
   # Each URL maps to a separate semaphore in LlamaPool.
   llama_pool_defaults: %{
-    "http://localhost:1234/v1" => 4,   # 0.6B chat/summarize
-    "http://localhost:1235/v1" => 2,   # BGE-M3 embedding
-    "http://localhost:1236/v1" => 4,   # 1.7B council
+    # 0.6B chat/summarize
+    "http://localhost:1234/v1" => 4,
+    # BGE-M3 embedding
+    "http://localhost:1235/v1" => 2,
+    # 1.7B council
+    "http://localhost:1236/v1" => 4
   },
   max_buckets_per_user: 30,
   system_buckets: ["inbox"],

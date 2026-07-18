@@ -41,7 +41,18 @@ defmodule Librarian.IngestRouter do
       # After routing, check if we should chunk
       case should_chunk?(routed_payload) do
         false ->
-          Librarian.ingest(routed_payload, user_id)
+          # Single payload - notify FlushQueue after ingest
+          case Librarian.ingest(routed_payload, user_id) do
+            {:ok, bucket} ->
+              Librarian.FlushQueue.payload_added(user_id, bucket)
+              {:ok, bucket}
+
+            {:ok, bucket, :duplicate} ->
+              {:ok, bucket}
+
+            error ->
+              error
+          end
 
         {:chunk, correlation_id} ->
           ingest_chunks(routed_payload, correlation_id, user_id)
@@ -314,8 +325,12 @@ defmodule Librarian.IngestRouter do
               Phoenix.PubSub.broadcast(
                 Librarian.PubSub,
                 "ingest",
-                {:ingested, bucket, chunk_payload.source, String.slice(clean_text, 0, 80), user_id}
+                {:ingested, bucket, chunk_payload.source, String.slice(clean_text, 0, 80),
+                 user_id}
               )
+
+              # Notify FlushQueue for auto-flush tracking
+              Librarian.FlushQueue.payload_added(user_id, bucket)
 
               {:ok, bucket}
 
@@ -338,6 +353,9 @@ defmodule Librarian.IngestRouter do
         {:error, "Some chunks failed to ingest"}
 
       false ->
+        # Notify FlushQueue once after all chunks are stored
+        # Use the inbox bucket since that's where chunks go
+        Librarian.FlushQueue.payload_added(user_id, "#{user_id}:inbox")
         {:ok, "#{user_id}:inbox", total_chunks}
     end
   end

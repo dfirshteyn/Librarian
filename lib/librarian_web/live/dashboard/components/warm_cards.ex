@@ -10,6 +10,8 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   attr(:council_pending, :any, required: true)
   attr(:publish_pending, :any, required: true)
   attr(:delegation_progress, :any, required: true)
+  attr(:flush_progress, :any, required: false)
+  attr(:new_memories, :map, required: false, default: %{})
 
   def warm_cards(assigns) do
     ~H"""
@@ -30,15 +32,28 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
         <% end %>
       </h2>
       <div class="flex-1 overflow-y-auto space-y-3">
+        <%= if has_flush_progress?(@flush_progress) do %>
+          <div class="mb-2 bg-gray-800 rounded p-2 border border-blue-600">
+            <div class="flex justify-between text-[10px] text-gray-400 mb-1">
+              <span class="text-blue-400 font-bold">🧼 Flushing to WARM...</span>
+              <span><%= flush_progress_text(@flush_progress) %></span>
+            </div>
+            <div class="h-1.5 bg-gray-700 rounded overflow-hidden">
+              <div class="h-1.5 bg-blue-500 rounded transition-all duration-300" style={"width: #{flush_progress_pct(@flush_progress)}%"}>
+              </div>
+            </div>
+          </div>
+        <% end %>
         <%= for memory <- Enum.sort_by(@memories, &(-&1.importance)) do %>
           <.warm_card memory={memory}
             expanded?={MapSet.member?(@expanded_memories, memory.id)}
             delegate_pending?={MapSet.member?(@council_pending, memory.id)}
             publish_pending?={MapSet.member?(@publish_pending, memory.id)}
             progress={Map.get(@delegation_progress, memory.id, nil)}
+            is_new={Map.get(@new_memories, memory.id, false)}
             tenant_id={@tenant_id} />
         <% end %>
-        <p :if={@memories == []} class="text-gray-600 text-xs">
+        <p :if={@memories == [] and not has_flush_progress?(@flush_progress)} class="text-gray-600 text-xs">
           No memories yet. Use the Ingest Feed or run Seed Demo to populate.
         </p>
       </div>
@@ -53,6 +68,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   attr(:delegate_pending?, :boolean, required: true)
   attr(:publish_pending?, :boolean, required: true)
   attr(:progress, :any, required: false)
+  attr(:is_new, :boolean, required: false, default: false)
   attr(:tenant_id, :string, required: true)
 
   def warm_card(assigns) do
@@ -63,6 +79,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       |> assign(:submitted?, not is_nil(memory.council))
       |> assign(:published?, memory.published)
       |> assign(:locked?, memory.locked)
+      |> assign(:is_new?, assigns.is_new)
       |> assign(
         :border_class,
         cond do
@@ -75,12 +92,15 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       )
 
     ~H"""
-    <div class={"bg-gray-800 rounded p-3 border #{@border_class} cursor-pointer transition-colors"}
+    <div class={"bg-gray-800 rounded p-3 border #{@border_class} cursor-pointer transition-colors #{if @is_new?, do: "animate-pulse ring-2 ring-blue-500 ring-opacity-50", else: ""}"}
          phx-click="toggle_memory" phx-value-id={@memory.id}>
       <div class="flex items-center gap-2 mb-2">
         <span class={"w-2 h-2 rounded-full flex-shrink-0 #{bucket_color(@memory.bucket)}"} />
         <span class="text-xs font-bold text-gray-200"><%= String.split(@memory.bucket, ":") |> List.last() %></span>
 
+        <%= if @is_new? do %>
+          <span class="text-[10px] text-blue-400 font-bold ml-1 animate-bounce">NEW</span>
+        <% end %>
         <%= if @published? do %>
           <span class="text-[10px] text-emerald-400 font-bold ml-1">✅ Published</span>
         <% end %>
@@ -133,7 +153,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
           <button phx-click="publish_memory" phx-value-id={@memory.id}
             class="text-xs bg-emerald-700 hover:bg-emerald-600 text-white px-2 py-1.5 rounded transition w-full mt-2 font-bold"
             phx-click-loading-text="Loading…">
-            🌐 Review &amp; Publish to Public Graph
+            🌐 Review & Publish to Public Graph
           </button>
         <% end %>
         <%= if not @submitted? and not @published? do %>
@@ -173,6 +193,32 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       </div>
     </div>
     """
+  end
+
+  # ── Flush Progress Helpers ─────────────────────────────────────
+
+  defp has_flush_progress?(nil), do: false
+
+  defp has_flush_progress?(%{} = progress) do
+    progress
+    |> Map.values()
+    |> Enum.any?(fn %{total: total} -> total && total > 0 end)
+  end
+
+  defp flush_progress_text(progress) do
+    total_processed =
+      progress |> Map.values() |> Enum.reduce(0, fn %{processed: p}, acc -> acc + p end)
+
+    total = progress |> Map.values() |> Enum.reduce(0, fn %{total: t}, acc -> acc + t end)
+    "#{total_processed}/#{total}"
+  end
+
+  defp flush_progress_pct(progress) do
+    total_processed =
+      progress |> Map.values() |> Enum.reduce(0, fn %{processed: p}, acc -> acc + p end)
+
+    total = progress |> Map.values() |> Enum.reduce(0, fn %{total: t}, acc -> acc + t end)
+    if total > 0, do: min(100, div(total_processed * 100, total)), else: 0
   end
 
   # ── Council synthesis detail (after delegate) ─────────────────────
