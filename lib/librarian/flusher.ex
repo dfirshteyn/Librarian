@@ -16,6 +16,8 @@ defmodule Librarian.Flusher do
   cosine similarity (not a tag-heuristic threshold) to merge clusters.
   """
 
+  @max_flush_timeout 150_000
+
   @doc """
   Drain one HOT bucket's payloads and run each through the curator, storing
   the result in WARM under the *curator-assigned* bucket (not the HOT
@@ -39,79 +41,91 @@ defmodule Librarian.Flusher do
         )
 
         results =
-          Enum.map(payloads, fn payload ->
-            case Librarian.Curator.summarize([payload], curator_impl) do
-              {:ok, result} ->
-                result =
-                  case Librarian.Curator.embed(result.summary, curator_impl) do
-                    {:ok, vec} ->
-                      %{result | embedding: vec}
+          payloads
+          |> Task.async_stream(
+            fn payload ->
+              case Librarian.Curator.summarize([payload], curator_impl) do
+                {:ok, result} ->
+                  result =
+                    case Librarian.Curator.embed(result.summary, curator_impl) do
+                      {:ok, vec} ->
+                        %{result | embedding: vec}
 
-                    {:error, embed_err} ->
-                      Logger.warning(
-                        "[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload"
-                      )
+                      {:error, embed_err} ->
+                        Logger.warning(
+                          "[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload"
+                        )
 
-                      # Put this payload back so a curator/embed failure loses nothing.
-                      # Mirrors the summarize-failure branch: the memory is NOT stored,
-                      # it's excluded from `succeeded`, and the WAL stays intact so it
-                      # retries on the next flush once the embedding server is back.
-                      Librarian.HotStore.put(bucket, payload)
-                      {:error, embed_err}
-                  end
+                        # Put this payload back so a curator/embed failure loses nothing.
+                        # Mirrors the summarize-failure branch: the memory is NOT stored,
+                        # it's excluded from `succeeded`, and the WAL stays intact so it
+                        # retries on the next flush once the embedding server is back.
+                        Librarian.HotStore.put(bucket, payload)
+                        {:error, embed_err}
+                    end
 
-                normalized = Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
-                warm_bucket = "#{user_id}:#{normalized}"
+                  normalized = Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+                  warm_bucket = "#{user_id}:#{normalized}"
 
-                # Link the scrubbed raw capture to the memory so progressive
-                # disclosure can pull the unedited original instantly on a
-                # vector match — without embedding it into the index.
-                memory =
-                  Librarian.WarmStore.put(warm_bucket, result,
-                    correlation_id: payload.parent_id,
-                    raw_original: payload.raw_text,
-                    file_type: payload.file_type,
-                    stored_path: payload.stored_path,
-                    dimensions: payload.dimensions
+                  # Link the scrubbed raw capture to the memory so progressive
+                  # disclosure can pull the unedited original instantly on a
+                  # vector match — without embedding it into the index.
+                  memory =
+                    Librarian.WarmStore.put(warm_bucket, result,
+                      correlation_id: payload.parent_id,
+                      raw_original: payload.raw_text,
+                      file_type: payload.file_type,
+                      stored_path: payload.stored_path,
+                      dimensions: payload.dimensions
+                    )
+
+                  Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
+
+                  # Log ancestry so the HOT→WARM transition is visible in the
+                  # ancestry modal. For chunked docs the edge points at the HOT
+                  # correlation id (the synthetic parent's origin); for normal
+                  # ingests it points at the HOT bucket that was just drained.
+                  origin =
+                    if payload.parent_id do
+                      "hot:#{payload.parent_id}"
+                    else
+                      "hot:#{bucket}"
+                    end
+
+                  Librarian.ColdStore.log_relationship(
+                    to_string(memory.id),
+                    origin,
+                    "derived_from",
+                    user_id,
+                    %{bucket: bucket, parent_id: payload.parent_id}
                   )
 
-                Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
-
-                # Log ancestry so the HOT→WARM transition is visible in the
-                # ancestry modal. For chunked docs the edge points at the HOT
-                # correlation id (the synthetic parent's origin); for normal
-                # ingests it points at the HOT bucket that was just drained.
-                origin =
+                  # Notify ChunkTracker if this was a chunked payload
                   if payload.parent_id do
-                    "hot:#{payload.parent_id}"
-                  else
-                    "hot:#{bucket}"
+                    Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
                   end
 
-                Librarian.ColdStore.log_relationship(
-                  to_string(memory.id),
-                  origin,
-                  "derived_from",
-                  user_id,
-                  %{bucket: bucket, parent_id: payload.parent_id}
-                )
+                  {:ok, memory}
 
-                # Notify ChunkTracker if this was a chunked payload
-                if payload.parent_id do
-                  Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
-                end
+                {:error, reason} ->
+                  Logger.warning(
+                    "[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload"
+                  )
 
-                {:ok, memory}
-
-              {:error, reason} ->
-                Logger.warning(
-                  "[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload"
-                )
-
-                # Put this payload back so a curator failure loses nothing.
-                Librarian.HotStore.put(bucket, payload)
-                {:error, reason}
-            end
+                  # Put this payload back so a curator failure loses nothing.
+                  Librarian.HotStore.put(bucket, payload)
+                  {:error, reason}
+              end
+            end,
+            timeout: @max_flush_timeout,
+            on_timeout: :kill_task,
+            max_concurrency: length(payloads)
+          )
+          |> Enum.map(fn
+            {:ok, result} -> result
+            {:exit, reason} ->
+              Logger.error("[Flusher] Payload processing timed out for bucket=#{bucket}: #{inspect(reason)}")
+              {:error, :timeout}
           end)
 
         succeeded = Enum.filter(results, &match?({:ok, _}, &1))

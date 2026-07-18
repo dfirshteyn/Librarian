@@ -83,6 +83,8 @@ defmodule Librarian.ParentSummarizer do
 
   # --- Private Implementation ---
 
+  @parent_synthesis_timeout 150_000
+
   defp do_synthesize_parent(correlation_id, chunk_ids, user_id) do
     # 1. Fetch all chunk memories
     chunk_memories = Enum.map(chunk_ids, &Librarian.WarmStore.get/1)
@@ -102,21 +104,35 @@ defmodule Librarian.ParentSummarizer do
         raw_text: combined_text
       }
 
-      # 4. Run through curator
-      curator_impl = Librarian.Curator.resolve_curator(user_id, [])
+      # 4. Run through curator with a timeout wrapper so a hung model
+      #    server doesn't block the pipeline indefinitely.
+      task = Task.Supervisor.async_nolink(Librarian.TaskSupervisor, fn ->
+        curator_impl = Librarian.Curator.resolve_curator(user_id, [])
 
-      result =
         case Librarian.Curator.summarize([payload], curator_impl) do
           {:ok, curated} ->
             # 5. Generate embedding
-            with {:ok, vec} <- Librarian.Curator.embed(curated.summary, curator_impl) do
-              {:ok, %{curated | embedding: vec}}
-            else
+            case Librarian.Curator.embed(curated.summary, curator_impl) do
+              {:ok, vec} -> {:ok, %{curated | embedding: vec}}
               _ -> {:ok, curated}
             end
 
           {:error, reason} ->
             {:error, reason}
+        end
+      end)
+
+      result =
+        case Task.yield(task, @parent_synthesis_timeout) do
+          {:ok, result} ->
+            result
+
+          nil ->
+            # Timed out — kill the task and return error
+            Task.shutdown(task, :brutal_kill)
+            require Logger
+            Logger.warning("[ParentSummarizer] Synthesis timed out for correlation_id=#{correlation_id}")
+            {:error, :timeout}
         end
 
       case result do

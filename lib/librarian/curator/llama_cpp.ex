@@ -82,48 +82,53 @@ defmodule Librarian.Curator.LlamaCpp do
   @impl true
   def describe_image(image_data, opts \\ []) when is_binary(image_data) do
     url = Keyword.get(opts, :url, base_url())
+    Librarian.LlamaPool.checkout(url)
 
-    # Encode as base64 for the API
-    b64 = Base.encode64(image_data)
+    try do
+      # Encode as base64 for the API
+      b64 = Base.encode64(image_data)
 
-    body = %{
-      "model" => Application.get_env(:librarian, :vision_model) || model_name(),
-      "messages" => [
-        %{
-          "role" => "user",
-          "content" => [
-            %{
-              "type" => "text",
-              "text" => "Describe this image in detail."
-            },
-            %{
-              "type" => "image_url",
-              "image_url" => %{"url" => "data:image/png;base64,#{b64}"}
-            }
-          ]
-        }
-      ],
-      "max_tokens" => 512
-    }
+      body = %{
+        "model" => Application.get_env(:librarian, :vision_model) || model_name(),
+        "messages" => [
+          %{
+            "role" => "user",
+            "content" => [
+              %{
+                "type" => "text",
+                "text" => "Describe this image in detail."
+              },
+              %{
+                "type" => "image_url",
+                "image_url" => %{"url" => "data:image/png;base64,#{b64}"}
+              }
+            ]
+          }
+        ],
+        "max_tokens" => 512
+      }
 
-    case Req.post(req(),
-           url: "#{url}/chat/completions",
-           json: body,
-           receive_timeout: 120_000
-         ) do
-      {:ok, %{status: 200, body: resp_body}} ->
-        with content when is_binary(content) <-
-               get_in(resp_body, ["choices", Access.at(0), "message", "content"]) do
-          {:ok, String.trim(content)}
-        else
-          nil -> {:error, :missing_content}
-        end
+      case Req.post(req(),
+             url: "#{url}/chat/completions",
+             json: body,
+             receive_timeout: 120_000
+           ) do
+        {:ok, %{status: 200, body: resp_body}} ->
+          with content when is_binary(content) <-
+                 get_in(resp_body, ["choices", Access.at(0), "message", "content"]) do
+            {:ok, String.trim(content)}
+          else
+            nil -> {:error, :missing_content}
+          end
 
-      {:ok, %{status: status, body: resp_body}} ->
-        {:error, {:api_error, status, resp_body}}
+        {:ok, %{status: status, body: resp_body}} ->
+          {:error, {:api_error, status, resp_body}}
 
-      {:error, reason} ->
-        {:error, {:http_error, reason}}
+        {:error, reason} ->
+          {:error, {:http_error, reason}}
+      end
+    after
+      Librarian.LlamaPool.checkin(url)
     end
   end
 
@@ -135,31 +140,36 @@ defmodule Librarian.Curator.LlamaCpp do
   def embed(text, opts) when is_binary(text) and is_list(opts) do
     {scrubbed, _} = Librarian.LeakGuard.scrub(text)
     url = Keyword.get(opts, :url, embed_url())
+    Librarian.LlamaPool.checkout(url)
 
-    body = %{
-      "input" => scrubbed,
-      "model" => model_name()
-    }
+    try do
+      body = %{
+        "input" => scrubbed,
+        "model" => model_name()
+      }
 
-    case Req.post(req(),
-           url: "#{url}/embeddings",
-           json: body,
-           receive_timeout: 30_000
-         ) do
-      {:ok, %{status: 200, body: resp_body}} ->
-        case get_in(resp_body, ["data", Access.at(0), "embedding"]) do
-          vec when is_list(vec) ->
-            {:ok, vec}
+      case Req.post(req(),
+             url: "#{url}/embeddings",
+             json: body,
+             receive_timeout: 30_000
+           ) do
+        {:ok, %{status: 200, body: resp_body}} ->
+          case get_in(resp_body, ["data", Access.at(0), "embedding"]) do
+            vec when is_list(vec) ->
+              {:ok, vec}
 
-          _ ->
-            {:error, :missing_embedding}
-        end
+            _ ->
+              {:error, :missing_embedding}
+          end
 
-      {:ok, %{status: status, body: resp_body}} ->
-        {:error, {:api_error, status, resp_body}}
+        {:ok, %{status: status, body: resp_body}} ->
+          {:error, {:api_error, status, resp_body}}
 
-      {:error, reason} ->
-        {:error, {:http_error, reason}}
+        {:error, reason} ->
+          {:error, {:http_error, reason}}
+      end
+    after
+      Librarian.LlamaPool.checkin(url)
     end
   end
 
@@ -169,45 +179,51 @@ defmodule Librarian.Curator.LlamaCpp do
   """
   def chat(prompt, opts \\ []) when is_binary(prompt) and is_list(opts) do
     url = Keyword.get(opts, :url, council_url())
-    temperature = Keyword.get(opts, :temperature, 0.1)
+    Librarian.LlamaPool.checkout(url)
 
-    {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
+    try do
+      temperature = Keyword.get(opts, :temperature, 0.1)
 
-    messages =
-      case Keyword.get(opts, :system_prompt) do
-        nil ->
-          [%{"role" => "user", "content" => scrubbed_prompt}]
+      {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
 
-        prompt_text ->
-          [
-            %{"role" => "system", "content" => prompt_text},
-            %{"role" => "user", "content" => scrubbed_prompt}
-          ]
+      messages =
+        case Keyword.get(opts, :system_prompt) do
+          nil ->
+            [%{"role" => "user", "content" => scrubbed_prompt}]
+
+          prompt_text ->
+            [
+              %{"role" => "system", "content" => prompt_text},
+              %{"role" => "user", "content" => scrubbed_prompt}
+            ]
+        end
+
+      response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
+
+      body = %{
+        "model" => model_name(),
+        "messages" => messages,
+        "response_format" => response_format,
+        "temperature" => temperature,
+        "max_tokens" => 512
+      }
+
+      case Req.post(req(),
+             url: "#{url}/chat/completions",
+             json: body,
+             receive_timeout: 120_000
+           ) do
+        {:ok, %{status: 200, body: resp_body}} ->
+          {:ok, resp_body}
+
+        {:ok, %{status: status, body: resp_body}} ->
+          {:error, {:api_error, status, resp_body}}
+
+        {:error, reason} ->
+          {:error, {:http_error, reason}}
       end
-
-    response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
-
-    body = %{
-      "model" => model_name(),
-      "messages" => messages,
-      "response_format" => response_format,
-      "temperature" => temperature,
-      "max_tokens" => 512
-    }
-
-    case Req.post(req(),
-           url: "#{url}/chat/completions",
-           json: body,
-           receive_timeout: 120_000
-         ) do
-      {:ok, %{status: 200, body: resp_body}} ->
-        {:ok, resp_body}
-
-      {:ok, %{status: status, body: resp_body}} ->
-        {:error, {:api_error, status, resp_body}}
-
-      {:error, reason} ->
-        {:error, {:http_error, reason}}
+    after
+      Librarian.LlamaPool.checkin(url)
     end
   end
 
