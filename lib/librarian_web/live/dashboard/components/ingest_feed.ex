@@ -132,7 +132,7 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
     end)
     |> case do
       {0, 0} -> "width: 0%"
-      {processed, total} -> "width: #{min(100, div(processed * 100, total))}%}"
+      {processed, total} -> "width: #{min(100, div(processed * 100, total))}%"
     end
   end
 end

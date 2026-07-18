@@ -132,10 +132,11 @@ defmodule Librarian.FlushQueue do
 
   defp cancel_timer_for(state, user_id) do
     case Map.get(state.timers, user_id) do
-      nil -> state
+      nil -> :ok
       timer_ref -> Process.cancel_timer(timer_ref)
     end
-    |> then(fn s -> %{s | timers: Map.delete(s.timers, user_id)} end)
+
+    %{state | timers: Map.delete(state.timers, user_id)}
   end
 
   defp reset_counts(state, user_id) do
