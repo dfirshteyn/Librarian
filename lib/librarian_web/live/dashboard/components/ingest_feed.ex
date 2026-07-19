@@ -64,9 +64,7 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
           <input type="file" name="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.gif,.txt,.md,.json,.csv" class="hidden" onchange="this.form.submit()" />
         </label>
       </form>
-      <iframe name="upload-iframe" id="upload-iframe" style="display:none"
-              onload="(function(){var f=document.getElementById('upload-iframe');if(f.dataset.loaded){window.location.reload()}else{f.dataset.loaded='1'}})()">
-      </iframe>
+      <iframe name="upload-iframe" id="upload-iframe" style="display:none"></iframe>
 
       <%= if has_flush_progress?(@flush_progress) do %>
         <div class="mb-2 bg-gray-800 rounded p-2 border border-blue-600">

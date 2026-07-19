@@ -3,7 +3,7 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
   Public graph visualization component.
 
   Renders a force-directed SVG graph of the public network nodes and edges.
-  Fetches data from `Librarian.Network.get_graph/0` on mount and when the graph drawer is opened or sync is clicked.
+  Fetches data from `Librarian.Network.get_graph/0` when the graph drawer is opened or sync is clicked.
 
   Nodes are colored by bucket, sized by importance, and labeled with
   truncated summaries. Edges are weighted by semantic similarity.
@@ -12,12 +12,14 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
 
   @impl true
   def mount(socket) do
-    {:ok, assign_graph(socket)}
+    # Don't fetch on mount - lazy load
+    {:ok, socket |> assign(:graph, nil)}
   end
 
   @impl true
   def update(_assigns, socket) do
-    {:ok, assign_graph(socket)}
+    # Never fetch in update - only fetch on explicit refresh event
+    {:ok, socket}
   end
 
   @impl true
@@ -36,6 +38,10 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
 
   @impl true
   def render(assigns) do
+    # Handle case where graph hasn't loaded yet
+    graph = assigns[:graph] || %{nodes: [], edges: []}
+    assigns = assign(assigns, :graph, graph)
+
     ~H"""
     <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 h-full flex flex-col">
       <div class="flex justify-between items-center mb-2">
@@ -49,60 +55,66 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
           </button>
         </div>
         <span class="text-[10px] text-gray-500">
-          {@graph.nodes |> length()} nodes · {@graph.edges |> length()} edges
+          <%= @graph.nodes |> length() %> nodes · <%= @graph.edges |> length() %> edges
         </span>
       </div>
 
       <div class="flex-1 relative overflow-hidden rounded bg-gray-950">
-        <svg viewBox="0 0 800 500" class="w-full h-full">
-          <%!-- Edges --%>
-          <%= for edge <- @graph.edges do %>
-            <line
-              x1={node_x(@graph.nodes, edge.source)}
-              y1={node_y(@graph.nodes, edge.source)}
-              x2={node_x(@graph.nodes, edge.target)}
-              y2={node_y(@graph.nodes, edge.target)}
-              stroke={edge_color(edge.weight)}
-              stroke-width={edge_width(edge.weight)}
-              stroke-opacity="0.4"
-            />
-          <% end %>
+        <%= if @graph.nodes == [] do %>
+          <div class="flex items-center justify-center h-full">
+            <p class="text-gray-500 text-xs">No public graph nodes yet. Be the first to publish!</p>
+          </div>
+        <% else %>
+          <svg viewBox="0 0 800 500" class="w-full h-full">
+            <%!-- Edges --%>
+            <%= for edge <- @graph.edges do %>
+              <line
+                x1={node_x(@graph.nodes, edge.source)}
+                y1={node_y(@graph.nodes, edge.source)}
+                x2={node_x(@graph.nodes, edge.target)}
+                y2={node_y(@graph.nodes, edge.target)}
+                stroke={edge_color(edge.weight)}
+                stroke-width={edge_width(edge.weight)}
+                stroke-opacity="0.4"
+              />
+            <% end %>
 
-          <%!-- Nodes --%>
-          <%= for {node, idx} <- Enum.with_index(@graph.nodes) do %>
-            <g class="cursor-pointer" phx-click="select_public_node" phx-value-id={node.id}>
-              <%!-- Glow --%>
-              <circle
-                cx={node_x(@graph.nodes, node.id)}
-                cy={node_y(@graph.nodes, node.id)}
-                r={node_radius(node.importance) + 4}
-                fill={bucket_color(node.bucket)}
-                fill-opacity="0.15"
-              />
-              <%!-- Core --%>
-              <circle
-                cx={node_x(@graph.nodes, node.id)}
-                cy={node_y(@graph.nodes, node.id)}
-                r={node_radius(node.importance)}
-                fill={bucket_color(node.bucket)}
-                stroke={bucket_color(node.bucket)}
-                stroke-width="1.5"
-                stroke-opacity="0.8"
-              />
-              <%!-- Label --%>
-              <text
-                x={node_x(@graph.nodes, node.id)}
-                y={node_y(@graph.nodes, node.id) + node_radius(node.importance) + 10}
-                text-anchor="middle"
-                fill="#9CA3AF"
-                font-size="7"
-                font-family="monospace"
-              >
-                <%= String.slice(node.summary, 0, 30) <> "..." %>
-              </text>
-            </g>
-          <% end %>
-        </svg>
+            <%!-- Nodes --%>
+            <%= for {node, idx} <- Enum.with_index(@graph.nodes) do %>
+              <g class="cursor-pointer" phx-click="select_public_node" phx-value-id={node.id}>
+                <%!-- Glow --%>
+                <circle
+                  cx={node_x(@graph.nodes, node.id)}
+                  cy={node_y(@graph.nodes, node.id)}
+                  r={node_radius(node.importance) + 4}
+                  fill={bucket_color(node.bucket)}
+                  fill-opacity="0.15"
+                />
+                <%!-- Core --%>
+                <circle
+                  cx={node_x(@graph.nodes, node.id)}
+                  cy={node_y(@graph.nodes, node.id)}
+                  r={node_radius(node.importance)}
+                  fill={bucket_color(node.bucket)}
+                  stroke={bucket_color(node.bucket)}
+                  stroke-width="1.5"
+                  stroke-opacity="0.8"
+                />
+                <%!-- Label --%>
+                <text
+                  x={node_x(@graph.nodes, node.id)}
+                  y={node_y(@graph.nodes, node.id) + node_radius(node.importance) + 10}
+                  text-anchor="middle"
+                  fill="#9CA3AF"
+                  font-size="7"
+                  font-family="monospace"
+                >
+                  <%= String.slice(node.summary, 0, 30) <> "..." %>
+                </text>
+              </g>
+            <% end %>
+          </svg>
+        <% end %>
       </div>
 
       <%!-- Legend --%>

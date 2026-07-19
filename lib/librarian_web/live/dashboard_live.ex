@@ -117,9 +117,9 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, assign(socket, :nightly_pass_enabled, new_val)}
   end
 
-
   def handle_info(:refresh_graph, socket) do
-    send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "public_graph")
+    # Fix: use the correct component ID "graph_overlay" to match the template
+    send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
     {:noreply, socket}
   end
 
@@ -146,7 +146,8 @@ defmodule LibrarianWeb.DashboardLive do
         socket
         |> update(:publish_pending, &MapSet.delete(&1, id))
         |> assign_memories(socket.assigns.tenant_id)
-        |> update_public_count()
+
+        # Don't update public_count here - it will be lazy-loaded when graph drawer opens
       else
         update(socket, :publish_pending, &MapSet.put(&1, id))
       end
@@ -159,15 +160,29 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   defp update_public_count(socket) do
-    assign(socket, :public_count, length(Librarian.Network.get_graph().nodes || []))
+    # Lazy: only update if graph drawer is currently open
+    if socket.assigns.show_graph and socket.assigns.graph_mode == "public" do
+      assign(socket, :public_count, length(Librarian.Network.get_graph().nodes || []))
+    else
+      socket
+    end
   end
 
   @impl true
   def handle_event("toggle_terminal", _params, socket),
     do: {:noreply, assign(socket, :show_terminal, not socket.assigns.show_terminal)}
 
-  def handle_event("toggle_graph", _params, socket),
-    do: {:noreply, assign(socket, :show_graph, not socket.assigns.show_graph)}
+  def handle_event("toggle_graph", _params, socket) do
+    socket = assign(socket, :show_graph, not socket.assigns.show_graph)
+    # When opening the graph drawer in public mode, trigger the component to load data
+    if socket.assigns.show_graph and socket.assigns.graph_mode == "public" do
+      send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
+      # Also update public_count when opening the graph (lazy)
+      {:noreply, update_public_count(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
 
   def handle_event("toggle_insights", _params, socket),
     do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
