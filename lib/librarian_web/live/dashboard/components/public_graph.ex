@@ -3,7 +3,7 @@ defmodule LibrarianWeb.Dashboard.Components.PublicGraph do
   Public graph visualization component.
 
   Renders a force-directed SVG graph of the public network nodes and edges.
-  Fetches data from `Librarian.Network.get_graph/0` on mount and every 30s.
+  Fetches data from `Librarian.Network.get_graph/0` on mount and when the graph drawer is opened or sync is clicked.
 
   Nodes are colored by bucket, sized by importance, and labeled with
   truncated summaries. Edges are weighted by semantic similarity.

@@ -26,13 +26,12 @@ defmodule LibrarianWeb.DashboardLive do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush_progress")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
-      :timer.send_interval(2000, self(), :refresh_warm)
     end
 
     {:ok,
      socket
-     |> stream(:feed, [])
-     |> assign(:feed_empty, true)
+     |> assign(:hot_payloads, HotStore.feed_entries_for_user(tenant_id))
+     |> assign(:feed_empty, false)
      |> assign(:tenant_id, tenant_id)
      |> assign(:tier, tier)
      |> assign(:force_local, false)
@@ -73,22 +72,12 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   @impl true
-  def handle_info({:ingested, bucket, source, preview, user_id}, socket) do
-    entry = %{
-      id: System.unique_integer([:positive, :monotonic]),
-      bucket: bucket,
-      source: source,
-      preview: preview,
-      user_id: user_id,
-      at: Time.utc_now() |> Time.truncate(:second)
-    }
-
+  def handle_info({:ingested, _bucket, _source, _preview, _user_id}, socket) do
     tid = socket.assigns.tenant_id
 
     {:noreply,
      socket
-     |> stream_insert(:feed, entry, at: 0, limit: 50)
-     |> assign(:feed_empty, false)
+     |> assign(:hot_payloads, HotStore.feed_entries_for_user(tid))
      |> assign(:hot_counts, hot_counts(tid))}
   end
 
@@ -128,18 +117,6 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, assign(socket, :nightly_pass_enabled, new_val)}
   end
 
-  def handle_info(:refresh_warm, socket) do
-    tid = socket.assigns.tenant_id
-
-    {:noreply,
-     socket
-     |> assign_memories(tid)
-     |> assign(:hot_counts, hot_counts(tid))
-     |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tid))
-     |> assign(:auto_consolidation_enabled, Librarian.Consolidation.AutomationServer.enabled?(tid))
-     |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tid))
-     |> assign(:insights, Librarian.morning_briefing(20))}
-  end
 
   def handle_info(:refresh_graph, socket) do
     send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "public_graph")
@@ -712,7 +689,7 @@ defmodule LibrarianWeb.DashboardLive do
         <% end %>
       </div>
       <div class="grid grid-cols-2 gap-4 flex-1 min-h-0">
-        <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} streams={@streams} hot_counts={@hot_counts} auto_flush_enabled={@auto_flush_enabled} flush_progress={@flush_progress} />
+        <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} hot_payloads={@hot_payloads} hot_counts={@hot_counts} auto_flush_enabled={@auto_flush_enabled} flush_progress={@flush_progress} />
         <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} flush_progress={@flush_progress} new_memories={@new_memories} auto_consolidation_enabled={@auto_consolidation_enabled} />
       </div>
       <.drawer_controls show_terminal={@show_terminal} show_graph={@show_graph} show_insights={@show_insights} private_count={@private_count} public_count={@public_count} insights_count={@insights_drawer_count} graph_mode={@graph_mode} />

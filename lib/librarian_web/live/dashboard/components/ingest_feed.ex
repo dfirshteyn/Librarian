@@ -7,7 +7,7 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
   attr(:ingest_text, :string, required: true)
   attr(:ingest_bucket, :string, required: true)
   attr(:feed_empty, :boolean, required: true)
-  attr(:streams, :map, required: true)
+  attr(:hot_payloads, :list, required: true)
   attr(:hot_counts, :map, required: true)
   attr(:auto_flush_enabled, :boolean, required: true)
   attr(:flush_progress, :map, required: false)
@@ -81,17 +81,17 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
         </div>
       <% end %>
 
-      <div class="flex-1 overflow-y-auto space-y-2" id="feed" phx-update="stream" style="max-height: 400px;">
-        <div :if={@feed_empty} id="feed-empty" class="text-gray-600 text-xs">
+      <div class="flex-1 overflow-y-auto space-y-2" id="feed" phx-update="replace" style="max-height: 400px;">
+        <div :if={@hot_payloads == [] and @hot_counts == %{}} id="feed-empty" class="text-gray-600 text-xs">
           Waiting for ingest events... use the text box above or run Seed Demo.
         </div>
-        <%= for {dom_id, entry} <- @streams.feed do %>
-          <div id={dom_id} class="border-l-2 border-gray-700 pl-3 py-1">
+        <%= for entry <- @hot_payloads do %>
+          <div id={"feed-entry-#{entry.id}"} class="border-l-2 border-gray-700 pl-3 py-1">
             <div class="flex items-center gap-2 mb-0.5">
               <span class={"w-2 h-2 rounded-full flex-shrink-0 #{bucket_color(entry.bucket)}"} />
               <span class="text-xs font-bold text-gray-200"><%= entry.bucket %></span>
               <span class="text-xs text-gray-500"><%= entry.source %></span>
-              <span class="text-xs text-gray-600 ml-auto"><%= entry.at %></span>
+              <span class="text-xs text-gray-600 ml-auto"><%= format_time(entry.at) %></span>
             </div>
             <p class="text-xs text-gray-400 truncate"><%= entry.preview %></p>
           </div>
@@ -131,5 +131,19 @@ defmodule LibrarianWeb.Dashboard.Components.IngestFeed do
       {0, 0} -> "width: 0%"
       {processed, total} -> "width: #{min(100, div(processed * 100, total))}%"
     end
+  end
+
+  defp format_time(nil), do: ""
+
+  defp format_time(%DateTime{} = dt) do
+    DateTime.to_time(dt) |> Time.truncate(:second) |> Time.to_string()
+  end
+
+  defp format_time(%Time{} = t) do
+    Time.to_string(Time.truncate(t, :second))
+  end
+
+  defp format_time(time) when is_binary(time) do
+    time
   end
 end

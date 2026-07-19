@@ -74,6 +74,38 @@ defmodule Librarian.HotStore do
   end
 
   @doc """
+  Return all payloads across all buckets for a given user,
+  each paired with its bucket name.
+  Used to populate the ingest feed on mount and refresh.
+  """
+  def all_for_user(user_id) do
+    buckets()
+    |> Enum.filter(&String.starts_with?(&1, "#{user_id}:"))
+    |> Enum.flat_map(fn bucket ->
+      Enum.map(all(bucket), fn payload -> {bucket, payload} end)
+    end)
+  end
+
+  @doc """
+  Return payloads for user's buckets, converted to feed entry format.
+  Each entry has: id, bucket, source, preview, user_id, at
+  """
+  def feed_entries_for_user(user_id) do
+    all_for_user(user_id)
+    |> Enum.with_index()
+    |> Enum.map(fn {{bucket, payload}, idx} ->
+      %{
+        id: System.unique_integer([:positive, :monotonic]) + idx,
+        bucket: bucket,
+        source: payload.source,
+        preview: String.slice(payload.raw_text || "", 0, 80),
+        user_id: user_id,
+        at: payload.occurred_at
+      }
+    end)
+  end
+
+  @doc """
   Rename a HOT bucket: drain old name and re-put under new name.
   If the old bucket has no data, this is a no-op.
   """

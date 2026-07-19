@@ -123,7 +123,6 @@ defmodule Librarian.Consolidator do
       end
     end)
 
-    IO.inspect(:ets.tab2list(table_ref), label: "[Swarm Init] Current ETS Table State")
 
     # For each memory still in the table, scan for mergeable neighbors
     Enum.each(memories, fn m ->
@@ -136,14 +135,12 @@ defmodule Librarian.Consolidator do
         neighbor_id = neighbor.id
 
         take_res = :ets.take(table_ref, neighbor_id)
-        IO.inspect(take_res, label: "[Atomic Take Result] Key: #{neighbor_id}")
 
         case take_res do
           [{^neighbor_id, {neighbor_mem, neighbor_lineage}}] ->
             sim = cosine_similarity(m.embedding, neighbor_mem.embedding)
 
             if sim && sim > @similarity_threshold && can_merge?(m, neighbor_mem) do
-              IO.puts("[Match Found] M1: #{m.id} -> M2: #{neighbor_mem.id} | Sim: #{sim}")
               # Look up the current state of the keeper (it may have been updated
               # by a prior merge in this same iteration)
               {current_keeper, current_lineage} =
