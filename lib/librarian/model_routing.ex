@@ -18,7 +18,25 @@ defmodule Librarian.ModelRouting do
       {Librarian.Curator.QwenApi, "qwen-turbo"}   → cloud, cheap, fast
       {Librarian.Curator.QwenApi, "qwen-plus"}     → cloud, bigger, better
       {Librarian.Curator.LlamaCpp, "qwen3.5-0.6b"} → local, free, limited
+
+  ## Environment override
+
+  The routing table can be overridden per-environment via config:
+
+      config :librarian, model_routing: %{
+        council_persona: {Librarian.Curator.Stub, "stub"},
+        consolidation: {Librarian.Curator.Stub, "stub"}
+      }
+
+  This is used in `config/test.exs` to avoid network calls and API keys.
   """
+
+  @defaults %{
+    council_persona: {Librarian.Curator.QwenApi, "qwen-turbo"},
+    council_judge: {Librarian.Curator.QwenApi, "qwen-plus"},
+    consolidation: {Librarian.Curator.QwenApi, "qwen-turbo"},
+    deep_pass: {Librarian.Curator.QwenApi, "qwen-plus"}
+  }
 
   @doc """
   Returns `{module, model_identifier}` for the given role.
@@ -26,10 +44,12 @@ defmodule Librarian.ModelRouting do
   The module implements `Librarian.Curator` behaviour (or at least provides
   `chat/2` and `summarize/1`). The model identifier is passed as the `:model`
   option to the module's functions.
+
+  Can be overridden via `config :librarian, model_routing: %{role => {mod, model}}`.
   """
   @spec for(atom()) :: {module(), String.t()}
-  def for(:council_persona), do: {Librarian.Curator.QwenApi, "qwen-turbo"}
-  def for(:council_judge), do: {Librarian.Curator.QwenApi, "qwen-plus"}
-  def for(:consolidation), do: {Librarian.Curator.QwenApi, "qwen-turbo"}
-  def for(:deep_pass), do: {Librarian.Curator.QwenApi, "qwen-plus"}
+  def for(role) do
+    overrides = Application.get_env(:librarian, :model_routing, %{})
+    Map.get(overrides, role, Map.fetch!(@defaults, role))
+  end
 end

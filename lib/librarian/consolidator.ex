@@ -12,6 +12,7 @@ defmodule Librarian.Consolidator do
   """
 
   @similarity_threshold 0.80
+  @recuration_timeout 60_000
 
   @doc ~S"""
   Run a full consolidation pass for a user.
@@ -303,79 +304,97 @@ defmodule Librarian.Consolidator do
   #   1. Write a new WarmStore entry (so the merged cluster gets a fresh id)
   #   2. Supersede every original memory that was absorbed into this cluster
   #   3. Archive the saved cluster to long-term SQLite ColdStore
+  #
+  # Re-curation API calls run concurrently (capped at 4) to avoid serializing
+  # a large sweep, but still stay under Alibaba's rate limit. Side-effects
+  # (WarmStore writes, archiving) run serially afterward to avoid interleaving.
   defp persist_clusters(clusters, user_id, _opts) do
     # Re-curation uses ModelRouting (Qwen Turbo by default) for every user.
     # This is a background batch job — cost is the same regardless of tier,
     # and we want consistent quality for merged cluster synthesis.
     {curator_mod, model} = Librarian.ModelRouting.for(:consolidation)
 
-    Enum.each(clusters, fn {cluster_mem, original_ids} ->
-      # Skip clusters that had no merges — the original already lives in WARM
-      if length(original_ids) <= 1 do
-        :ok
-      else
-        # 1. Reconstruct clean, uncorrupted individual summaries directly from WARM
-        combined_text =
-          [cluster_mem.id | original_ids]
-          |> Enum.flat_map(fn id ->
-            case Librarian.WarmStore.get(id) do
-              nil -> []
-              m -> [m.summary]
-            end
-          end)
-          |> Enum.uniq()
-          |> Enum.join("\n")
+    # Phase 1 — concurrent API calls: prepare payloads and summarize in parallel.
+    # Only clusters with actual merges (>1 original_ids) need re-curation.
+    merged = Enum.filter(clusters, fn {_mem, ids} -> length(ids) > 1 end)
 
-        payload = %Librarian.Capture.Payload{
-          source: "consolidator",
-          raw_text: combined_text
+    api_results =
+      merged
+      |> Task.async_stream(
+        fn {cluster_mem, original_ids} ->
+          # Reconstruct clean, uncorrupted individual summaries directly from WARM
+          combined_text =
+            [cluster_mem.id | original_ids]
+            |> Enum.flat_map(fn id ->
+              case Librarian.WarmStore.get(id) do
+                nil -> []
+                m -> [m.summary]
+              end
+            end)
+            |> Enum.uniq()
+            |> Enum.join("\n")
+
+          payload = %Librarian.Capture.Payload{
+            source: "consolidator",
+            raw_text: combined_text
+          }
+
+          case curator_mod.summarize([payload], model: model) do
+            {:ok, curated} -> {:ok, {cluster_mem, original_ids, curated}}
+            {:error, reason} -> {:error, {cluster_mem, reason}}
+          end
+        end,
+        max_concurrency: 4,
+        timeout: @recuration_timeout,
+        on_timeout: :kill_task
+      )
+      |> Enum.map(fn
+        {:ok, {:ok, {cluster_mem, ids, curated}}} -> {:ok, {cluster_mem, ids, curated}}
+        {:ok, {:error, {cluster_mem, reason}}} -> {:error, {cluster_mem, reason}}
+        {:exit, reason} -> {:error, {nil, {:timeout, reason}}}
+      end)
+
+    # Phase 2 — serial side-effects: persist results in order.
+    Enum.each(api_results, fn
+      {:ok, {cluster_mem, original_ids, curated}} ->
+        # Assemble a pristine Result struct with correctly isolated bucket context
+        curator_result = %Librarian.Curator.Result{
+          summary: curated.summary,
+          facts: curated.facts,
+          tags: curated.tags,
+          importance: curated.importance,
+          bucket: cluster_mem.bucket |> String.split(":") |> List.last(),
+          embedding: nil
         }
 
-        # 2. Run synthesis through ModelRouting's curator module.
-        #    summarize/2 returns {:ok, %Curator.Result{...}} — same struct shape
-        #    as the old resolve_curator path, so the rest of the pipeline is unchanged.
-        case curator_mod.summarize([payload], model: model) do
-          {:ok, curated} ->
-            # 3. Assemble a pristine Result struct with correctly isolated bucket context
-            curator_result = %Librarian.Curator.Result{
-              summary: curated.summary,
-              facts: curated.facts,
-              tags: curated.tags,
-              importance: curated.importance,
-              bucket: cluster_mem.bucket |> String.split(":") |> List.last(),
-              embedding: nil
-            }
+        # Atomic storage, cross-linking, and cold-storage archival
+        saved = Librarian.WarmStore.put(cluster_mem.bucket, curator_result)
 
-            # 4. Atomic storage, cross-linking, and cold-storage archival
-            saved = Librarian.WarmStore.put(cluster_mem.bucket, curator_result)
+        all_originals = Enum.uniq([cluster_mem.id | original_ids])
 
-            all_originals = Enum.uniq([cluster_mem.id | original_ids])
+        # Log each superseded memory as a relationship
+        Enum.each(all_originals, fn orig_id ->
+          Librarian.WarmStore.supersede(orig_id, saved.id)
 
-            # Log each superseded memory as a relationship
-            Enum.each(all_originals, fn orig_id ->
-              Librarian.WarmStore.supersede(orig_id, saved.id)
+          Librarian.ColdStore.log_relationship(
+            to_string(orig_id),
+            to_string(saved.id),
+            "superseded_by",
+            user_id,
+            %{}
+          )
+        end)
 
-              Librarian.ColdStore.log_relationship(
-                to_string(orig_id),
-                to_string(saved.id),
-                "superseded_by",
-                user_id,
-                %{}
-              )
-            end)
+        Librarian.ColdStore.archive(saved, user_id)
 
-            Librarian.ColdStore.archive(saved, user_id)
+      {:error, {cluster_mem, reason}} ->
+        require Logger
 
-          {:error, reason} ->
-            require Logger
+        Logger.warning(
+          "Consolidation re-curation failed via #{inspect(curator_mod)} for cluster #{inspect(cluster_mem && cluster_mem.id)}, skipping. Reason: #{inspect(reason)}"
+        )
 
-            Logger.warning(
-              "Consolidation re-curation failed via #{inspect(curator_mod)}, skipping cluster. Reason: #{inspect(reason)}"
-            )
-
-            :ok
-        end
-      end
+        :ok
     end)
   end
 

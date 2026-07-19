@@ -19,7 +19,7 @@ defmodule Librarian.Curator.Stub do
   @embedding_dim 64
 
   @impl true
-  def summarize(chunk) when is_list(chunk) do
+  def summarize(chunk, _opts \\ []) when is_list(chunk) do
     text =
       chunk
       |> Enum.map(& &1.raw_text)
@@ -52,6 +52,31 @@ defmodule Librarian.Curator.Stub do
   @impl true
   def describe_image(_image_data, _opts \\ []) do
     {:ok, "Image description (stub) — no vision model configured"}
+  end
+
+  @doc """
+  Chat function for test compatibility. Returns a mock response body
+  shaped like an OpenAI-compatible chat completion, which the caller
+  parses via `get_in(body, ["choices", Access.at(0), "message", "content"])`.
+  """
+  def chat(prompt, opts \\ []) when is_binary(prompt) and is_list(opts) do
+    _system_prompt = Keyword.get(opts, :system_prompt, "")
+    _temperature = Keyword.get(opts, :temperature, 0.1)
+
+    # Build a deterministic mock response from the prompt content
+    content = "Stub response to: #{String.slice(prompt, 0, 200)}"
+
+    body = %{
+      "choices" => [
+        %{
+          "message" => %{
+            "content" => content
+          }
+        }
+      ]
+    }
+
+    {:ok, body}
   end
 
   @impl true
