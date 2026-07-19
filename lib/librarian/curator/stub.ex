@@ -63,8 +63,12 @@ defmodule Librarian.Curator.Stub do
     _system_prompt = Keyword.get(opts, :system_prompt, "")
     _temperature = Keyword.get(opts, :temperature, 0.1)
 
-    # Build a deterministic mock response from the prompt content
-    content = "Stub response to: #{String.slice(prompt, 0, 200)}"
+    # Return a JSON object that satisfies both persona (just extracts content string)
+    # and Judge (calls Json.decode on content). The persona parse_take/1 just does
+    # String.trim(content), so any string works. The Judge's parse_synthesis/1 calls
+    # Json.decode(content) and expects a map with summary/facts/tags/etc.
+    content =
+      ~s({"summary":"Stub synthesis: #{String.slice(prompt, 0, 100)}","facts":["stub fact"],"tags":["stub"],"importance":0.5,"bucket":"inbox","persona_perspectives":{"skeptic":"stub","structural_analyst":"stub","connector":"stub","literalist":"stub"}})
 
     body = %{
       "choices" => [

@@ -220,28 +220,62 @@ defmodule Librarian.Council do
 
     %{incoming: incoming} = Librarian.ColdStore.get_memory_lineage(memory_id_str, user_id)
 
-    child_ids =
+    # Collect both provenance sources into a single list of {label, memory} tuples
+    # so they appear together under a single heading in the prompt.
+
+    # 1) Document chunks (chunk_of edges) — fragments of the same original document
+    chunk_of_memories =
       incoming
       |> Enum.filter(fn r -> r.type == "chunk_of" end)
       |> Enum.map(fn r -> r.source_id end)
+      |> Enum.flat_map(fn id_str ->
+        case Integer.parse(id_str) do
+          {int_id, ""} -> [Librarian.WarmStore.get(int_id)]
+          _ -> [nil]
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
 
-    child_ids
-    |> Enum.map(fn id_str ->
-      case Integer.parse(id_str) do
-        {int_id, ""} -> Librarian.WarmStore.get(int_id)
-        _ -> nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.with_index(1)
-    |> Enum.map(fn {chunk, idx} ->
-      """
-      --- Source Chunk ##{idx} ---
-      #{chunk.summary || ""}
-      Facts: #{Enum.join(chunk.facts || [], ". ")}
-      """
-    end)
-    |> Enum.join("\n")
+    # 2) Merged prior observations (superseded_by edges, incoming) —
+    #    memories that were consolidated into this one. The consolidator
+    #    writes superseded_by with source_id=original, target_id=consolidated,
+    #    so for a consolidated memory's incoming edges, source_id is the original.
+    superseded_memories =
+      incoming
+      |> Enum.filter(fn r -> r.type == "superseded_by" end)
+      |> Enum.map(fn r -> r.source_id end)
+      |> Enum.flat_map(fn id_str ->
+        case Integer.parse(id_str) do
+          {int_id, ""} -> [Librarian.WarmStore.get(int_id)]
+          _ -> [nil]
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    # Label and interleave both groups with distinct provenance markers
+    chunks =
+      chunk_of_memories
+      |> Enum.with_index(1)
+      |> Enum.map(fn {mem, idx} ->
+        """
+        --- Document Fragment ##{idx} ---
+        #{mem.summary || ""}
+        Facts: #{Enum.join(mem.facts || [], ". ")}
+        """
+      end)
+
+    merged =
+      superseded_memories
+      |> Enum.with_index(1)
+      |> Enum.map(fn {mem, idx} ->
+        """
+        --- Merged from prior observation ##{idx} ---
+        #{mem.summary || ""}
+        Facts: #{Enum.join(mem.facts || [], ". ")}
+        """
+      end)
+
+    (chunks ++ merged) |> Enum.join("\n")
   end
 
   defp build_children_context(_memory, _user_id), do: ""

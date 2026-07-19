@@ -38,7 +38,20 @@ defmodule Librarian.DelegationTest do
 
   # No external services needed: delegate returns an error (Council LLM not
   # running in CI) and MUST auto-release the hard lock + leave council unset.
+  # Uses FailingStub to explicitly force a Council failure path.
   test "delegate auto-releases lock even when council errors" do
+    # Override model routing to use FailingStub for this test
+    original_routing = Application.get_env(:librarian, :model_routing, %{})
+
+    Application.put_env(:librarian, :model_routing, %{
+      council_persona: {Librarian.Curator.FailingStub, "stub"},
+      council_judge: {Librarian.Curator.FailingStub, "stub"}
+    })
+
+    on_exit(fn ->
+      Application.put_env(:librarian, :model_routing, original_routing)
+    end)
+
     mk_memory(id: 43, locked: false)
 
     result = Librarian.Delegation.delegate_to_council(43, "local")
