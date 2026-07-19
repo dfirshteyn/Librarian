@@ -92,7 +92,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:hot_counts, hot_counts(tid))}
   end
 
-  def handle_info({:flushed, _bucket}, socket) do
+  def handle_info({:flushed, _bucket, _user_id}, socket) do
     tid = socket.assigns.tenant_id
 
     {:noreply,

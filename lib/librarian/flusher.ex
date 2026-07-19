@@ -143,7 +143,8 @@ defmodule Librarian.Flusher do
                   )
 
                   # Put this payload back so a curator failure loses nothing.
-                  Librarian.HotStore.put(bucket, payload)
+                  # Use synchronous put to ensure WAL is written before truncate.
+                  Librarian.HotStore.put_deterministic(bucket, payload)
                   {:error, reason}
               end
             end,
@@ -152,22 +153,16 @@ defmodule Librarian.Flusher do
             max_concurrency: length(payloads)
           )
           |> Enum.map(fn
-            {:ok, result} ->
-              result
-
-            {:exit, reason} ->
-              Logger.error(
-                "[Flusher] Payload processing timed out for bucket=#{bucket}: #{inspect(reason)}"
-              )
-
-              {:error, :timeout}
+            {:ok, result} -> result
+            {:exit, _reason} -> {:error, :timeout}
           end)
 
         succeeded = Enum.filter(results, &match?({:ok, _}, &1))
+        failed = Enum.filter(results, &match?({:error, _}, &1))
 
-        # Only truncate WAL if at least one payload was successfully curated.
-        # If everything failed the WAL stays intact so payloads survive a restart.
-        if succeeded != [] do
+        # Only truncate WAL if ALL payloads were successfully curated.
+        # If any failed, the WAL must stay intact to preserve re-queued payloads.
+        if failed == [] and succeeded != [] do
           Librarian.Wal.truncate(bucket)
         end
 
@@ -186,7 +181,7 @@ defmodule Librarian.Flusher do
 
   `user_filter` scopes the flush to a single tenant:
     - `nil` (default) → flush ALL users' buckets (admin / global nightly pass)
-    - a binary user_id → flush only buckets matching `"\#{user_id}:"`,
+    - a binary user_id → flush only buckets matching `"user_id:"` (prefix match),
       so one tenant's "flush all" never drains another tenant's HOT tier.
 
   `flush_bucket/2` is already tenant-safe (buckets are namespaced
@@ -298,12 +293,8 @@ defmodule Librarian.Flusher do
     # Apply re-scores
     Enum.each(actions[:re_scores] || [], fn %{"id" => id, "importance" => imp} ->
       case Librarian.WarmStore.get(id) do
-        nil ->
-          :ok
-
-        memory ->
-          updated = %{memory | importance: imp}
-          :ets.insert(Librarian.WarmStore, {id, updated})
+        nil -> :ok
+        memory -> :ets.insert(Librarian.WarmStore, {id, %{memory | importance: imp}})
       end
     end)
 
@@ -331,9 +322,7 @@ defmodule Librarian.Flusher do
     # Apply new tags
     Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
       case Librarian.WarmStore.get(id) do
-        nil ->
-          :ok
-
+        nil -> :ok
         memory ->
           updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}
           :ets.insert(Librarian.WarmStore, {id, updated})
