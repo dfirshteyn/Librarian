@@ -213,9 +213,13 @@ defmodule Librarian.HotStore do
   # This is what closes the "HOT crash loses unflushed data" gap:
   # on restart we stream the WAL back in before accepting new writes.
   defp replay_wal(bucket, table) do
+    user_id = bucket |> String.split(":") |> hd()
+
     Librarian.Wal.replay(bucket)
     |> Enum.reduce(0, fn payload, seq ->
       :ets.insert(table, {seq, payload})
+      # Notify FlushQueue that payloads were restored from WAL (for auto-flush)
+      Librarian.FlushQueue.payload_added(user_id, bucket)
       seq + 1
     end)
   end

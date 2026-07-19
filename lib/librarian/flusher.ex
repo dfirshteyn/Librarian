@@ -87,13 +87,26 @@ defmodule Librarian.Flusher do
 
                   warm_bucket = "#{user_id}:#{normalized}"
 
+                  # Scrub payload.raw_text before storing as raw_original in WARM.
+                  # HOT's ETS intentionally keeps unscrubbed text for performance,
+                  # but WARM/COLD are durable user-visible layers that must be clean.
+                  {scrubbed_original, redact_count} = Librarian.LeakGuard.scrub(payload.raw_text)
+
+                  if redact_count > 0 do
+                    require Logger
+
+                    Logger.warning(
+                      "[Flusher] Redacted #{redact_count} secret(s) from raw_original before WARM storage"
+                    )
+                  end
+
                   # Link the scrubbed raw capture to the memory so progressive
-                  # disclosure can pull the unedited original instantly on a
+                  # disclosure can pull the clean original instantly on a
                   # vector match — without embedding it into the index.
                   memory =
                     Librarian.WarmStore.put(warm_bucket, result,
                       correlation_id: payload.parent_id,
-                      raw_original: payload.raw_text,
+                      raw_original: scrubbed_original,
                       file_type: payload.file_type,
                       stored_path: payload.stored_path,
                       dimensions: payload.dimensions
@@ -322,7 +335,9 @@ defmodule Librarian.Flusher do
     # Apply new tags
     Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
       case Librarian.WarmStore.get(id) do
-        nil -> :ok
+        nil ->
+          :ok
+
         memory ->
           updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}
           :ets.insert(Librarian.WarmStore, {id, updated})
