@@ -237,57 +237,25 @@ extension/           the Chrome extension capture source (MV3, no background
 test/librarian_test.exs   the suite referenced above
 ```
 
+## Self-Hosting
 
+**Required environment variables:**
+- `SECRET_KEY_BASE` — generate with `mix phx.gen.secret` (for prod)
+- `DATABASE_URL` — your private SQLite path (e.g., `priv/data/librarian_dev.db`) or PostgreSQL connection
 
+**Optional environment variables:**
+- `DATABASE_PUBLIC_URL` — connect to the shared global knowledge graph (leave unset for isolated deployment)
+- `DASHSCOPE_API_KEY` — Qwen API key (or use local LlamaCpp models via `llama_cpp_url`)
 
-That telecom angle is the right instinct and it's not a stretch — it's literally where Erlang came from. Ericsson built it in 1986 specifically for telephone switching systems. The problem then: millions of concurrent calls, any single failure cannot bring down the exchange, calls are stateful sessions that span arbitrary time. The problem now with AI customer service agents: millions of concurrent conversations, any single agent crash cannot affect other users, each session needs persistent memory across turns. Same problem, 40 years later. The BEAM was already the right answer.
+**Quick start for local development:**
+```bash
+mix deps.get
+mix test
+iex -S mix
+```
 
-Here's the honest numbers for your charts, organized the way judges will find most compelling:
-
-**Chart 1: Cost to run 10,000 concurrent AI agent sessions**
-
-| Stack | Infrastructure | Memory needed | Monthly cost estimate |
-|---|---|---|---|
-| Python + Redis + k8s | 3+ services, pod per agent | ~80GB RAM | $800-2000/mo |
-| Node + Redis + PM2 | 2 services, thread per agent | ~40GB RAM | $400-800/mo |
-| Elixir/BEAM (Librarian) | 1 process, GenServer per session | ~4GB RAM | $40-80/mo |
-
-The BEAM number is real — each GenServer process costs roughly 2-4KB of heap. 10,000 of them is 40MB. The rest is your application code, ETS tables, and BEAM overhead. You can run this on a $20/month ECS instance.
-
-**Chart 2: Latency breakdown for a memory recall**
-
-| Operation | Python + Redis + Qdrant | Elixir/Librarian |
-|---|---|---|
-| HOT lookup | 1-5ms (Redis network) | 1-5µs (ETS, in-process) |
-| WARM vector search | 50-200ms (Qdrant network) | 500µs-2ms (Nx cosine, in-process) |
-| Agent crash recovery | 10-30s (k8s pod restart) | <1ms (Supervisor restart) |
-| Spawn new agent | 500ms-5s (container) | 1-5µs (GenServer) |
-
-ETS vs Redis is roughly 100-1000x faster because there's no network hop — it's a lookup in the same memory space as your application. That's the number to lead with.
-
-**Chart 3: What you DON'T need**
-
-The infrastructure subtraction story is as powerful as the performance story:
-
-| Python/Node AI stack | Librarian/BEAM |
-|---|---|
-| Redis (shared cache) | ETS (built-in, in-process) |
-| Celery/Bull (job queues) | GenServer + Task (built-in) |
-| Kubernetes (container orchestration) | OTP Supervisors (built-in) |
-| Service mesh (agent-to-agent communication) | Distributed Erlang (built-in) |
-| Separate WebSocket server | Phoenix Channels (built-in) |
-| Monitoring agent restart logic | Supervision trees (built-in) |
-
-Every row is a service you don't pay for, a config file you don't write, a failure mode you don't debug at 3am.
-
-**For the blog, the story arc that writes itself:**
-
-Open with the problem you experienced personally — copying conversations between Claude, ChatGPT, Qwen, losing context, juggling free tiers. Then pivot to "this is the same problem every AI-powered customer service team has, just at 10,000x scale." Then explain what you built and why Elixir was the only right answer. Then show the numbers above. Close with the Alibaba Cloud angle — this runs on a single ECS instance for what a k8s cluster would cost.
-
-The personal story matters because it makes the judges trust that you actually understand the problem. You built this because you needed it. That comes through.
-
-**On the SaaS vision — keep this thread alive after July 9:**
-
-The architecture you have is genuinely deployable as a product. Multi-tenant namespacing is in. REST API is in. What you'd add for real users: `mix phx.gen.auth` for accounts, Stripe for billing, rate limiting per tier, OSS for COLD tier persistence. That's maybe two weeks of real work on top of what exists. The positioning writes itself — "Mem0 for teams who don't want to pay per-memory-operation and don't want their data leaving their infrastructure."
-
-One thing worth doing before you record the video: open three browser windows side by side, label them "Agent: Sales", "Agent: Support", "Agent: Billing", have each one hitting the `/api/ingest` endpoint with different content simultaneously, and show the admin dashboard seeing all three memory streams in real time with zero interference between them. That's your telecom switchboard moment and it costs nothing to set up.
+The app runs with default configuration for development. For production, set the environment variables above and run:
+```bash
+mix assets.deploy  # Build static assets
+mix phx.server
+```

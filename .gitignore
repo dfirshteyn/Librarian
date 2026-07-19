@@ -40,8 +40,20 @@ librarian_test-wal
 *-shm
 *-wal
 
-# Elixir /priv directory used to store static assets and ETS storage files for the daemon.
-/priv/
+# priv directory - be selective
+/priv/data/*.db
+/priv/data/*-shm
+/priv/data/*-wal
+/priv/wal/*.wal
+/priv/uploads/
+/priv/cold/*.jsonl
+/priv/models/
+/priv/static/
+!/priv/repo/migrations/
+!/priv/public_repo/migrations/
+!/priv/scripts/
+!/priv/static/assets/app.js
+!/priv/static/assets/app.css
 
 # Ignore the Elixir Language Server artifacts
 /.elixir_ls/
