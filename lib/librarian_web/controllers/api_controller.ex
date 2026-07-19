@@ -626,12 +626,28 @@ defmodule LibrarianWeb.ApiController do
           file_content = File.read!(upload.path)
           mime_type = Librarian.Utils.FileDetector.mime_type(upload.filename)
 
-          # Base64-encode the file data for transport
-          b64_data = Base.encode64(file_content)
+          is_text =
+            String.starts_with?(mime_type, "text/") or
+              mime_type in [
+                "application/json",
+                "application/javascript",
+                "application/typescript",
+                "application/yaml",
+                "application/toml"
+              ]
+
+          # Keep text files as raw_text, base64-encode other binaries for file_data
+          {raw_text, b64_data} =
+            if is_text do
+              {file_content, nil}
+            else
+              {nil, Base.encode64(file_content)}
+            end
 
           # Build params for IngestRouter
           ingest_params =
             params
+            |> Map.put("raw_text", raw_text)
             |> Map.put("file_data", b64_data)
             |> Map.put("original_filename", upload.filename)
             |> Map.put("file_type", mime_type)
@@ -697,9 +713,19 @@ defmodule LibrarianWeb.ApiController do
         file_content = File.read!(upload.path)
         mime_type = Librarian.Utils.FileDetector.mime_type(upload.filename)
 
+        is_text =
+          String.starts_with?(mime_type, "text/") or
+            mime_type in [
+              "application/json",
+              "application/javascript",
+              "application/typescript",
+              "application/yaml",
+              "application/toml"
+            ]
+
         # Base64-encode binary files, keep text as-is
         {raw_text, file_data} =
-          if String.starts_with?(mime_type, "text/") or mime_type == "application/json" do
+          if is_text do
             {file_content, nil}
           else
             # For images, PDFs, etc. — put base64 in file_data, leave raw_text for description

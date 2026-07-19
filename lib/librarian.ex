@@ -31,7 +31,7 @@ defmodule Librarian do
         {:ok, bucket, :duplicate}
 
       {:ok, :stored} ->
-        preview = String.slice(payload.raw_text, 0, 80)
+        preview = String.slice(payload.raw_text || "", 0, 80)
 
         Phoenix.PubSub.broadcast(
           Librarian.PubSub,

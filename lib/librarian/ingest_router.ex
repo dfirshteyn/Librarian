@@ -42,17 +42,14 @@ defmodule Librarian.IngestRouter do
       case should_chunk?(routed_payload) do
         false ->
           # Single payload - notify FlushQueue after ingest
-          case Librarian.ingest(routed_payload, user_id) do
-            {:ok, bucket} ->
-              Librarian.FlushQueue.payload_added(user_id, bucket)
-              {:ok, bucket}
+           case Librarian.ingest(routed_payload, user_id) do
+             {:ok, bucket} ->
+               Librarian.FlushQueue.payload_added(user_id, bucket)
+               {:ok, bucket}
 
-            {:ok, bucket, :duplicate} ->
-              {:ok, bucket}
-
-            error ->
-              error
-          end
+             {:ok, bucket, :duplicate} ->
+               {:ok, bucket}
+           end
 
         {:chunk, correlation_id} ->
           ingest_chunks(routed_payload, correlation_id, user_id)
@@ -128,11 +125,48 @@ defmodule Librarian.IngestRouter do
         process_pdf(payload, user_id)
 
       :text ->
-        {:ok, payload}
+        process_text(payload, user_id)
 
       :binary ->
         {:error, {:unsupported_type, "unknown binary format — supported: images, PDFs, text"}}
     end
+  end
+
+  # --- Text/Code processing ---
+
+  defp process_text(%Payload{} = payload, user_id) do
+    if payload.original_data do
+      text_data = payload.original_data
+
+      raw_text =
+        if FileDetector.is_base64?(text_data) do
+          Base.decode64!(text_data)
+        else
+          text_data
+        end
+
+      filename = payload.original_filename || "document.txt"
+
+      {:ok, stored_path} =
+        FileStore.store(
+          user_id: user_id,
+          filename: filename,
+          data: raw_text
+        )
+
+      return_payload = %Payload{
+        payload
+        | raw_text: raw_text,
+          stored_path: stored_path,
+          original_data: nil
+      }
+
+      {:ok, return_payload}
+    else
+      {:ok, payload}
+    end
+  rescue
+    e -> {:error, {:text_processing_error, inspect(e)}}
   end
 
   # --- Image processing ---
