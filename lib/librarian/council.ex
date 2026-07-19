@@ -174,10 +174,13 @@ defmodule Librarian.Council do
     prompt = "Analyze the following context block:\n\n#{content}"
     {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
 
-    # Stage 1: Personas use local LlamaCpp (small model on port 1234/1236)
-    case Librarian.Curator.LlamaCpp.chat(scrubbed_prompt,
+    # Stage 1: Personas routed via ModelRouting (Qwen Turbo by default)
+    {mod, model} = Librarian.ModelRouting.for(:council_persona)
+
+    case mod.chat(scrubbed_prompt,
            system_prompt: cfg.system_prompt,
-           temperature: cfg.temperature
+           temperature: cfg.temperature,
+           model: model
          ) do
       {:ok, body} ->
         parse_take(body)

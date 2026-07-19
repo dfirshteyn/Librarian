@@ -303,11 +303,11 @@ defmodule Librarian.Consolidator do
   #   1. Write a new WarmStore entry (so the merged cluster gets a fresh id)
   #   2. Supersede every original memory that was absorbed into this cluster
   #   3. Archive the saved cluster to long-term SQLite ColdStore
-  defp persist_clusters(clusters, user_id, opts) do
-    # Tier-aware re-curation: judges (user_id starts with "judge_") get the
-    # premium Alibaba Cloud Qwen API; free/anon users get the local model.
-    # `force_local` opt lets the dashboard toggle the local model even for judges.
-    curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
+  defp persist_clusters(clusters, user_id, _opts) do
+    # Re-curation uses ModelRouting (Qwen Turbo by default) for every user.
+    # This is a background batch job — cost is the same regardless of tier,
+    # and we want consistent quality for merged cluster synthesis.
+    {curator_mod, model} = Librarian.ModelRouting.for(:consolidation)
 
     Enum.each(clusters, fn {cluster_mem, original_ids} ->
       # Skip clusters that had no merges — the original already lives in WARM
@@ -331,8 +331,10 @@ defmodule Librarian.Consolidator do
           raw_text: combined_text
         }
 
-        # 2. Run synthesis through the configured curator engine
-        case curator_impl.summarize([payload]) do
+        # 2. Run synthesis through ModelRouting's curator module.
+        #    summarize/2 returns {:ok, %Curator.Result{...}} — same struct shape
+        #    as the old resolve_curator path, so the rest of the pipeline is unchanged.
+        case curator_mod.summarize([payload], model: model) do
           {:ok, curated} ->
             # 3. Assemble a pristine Result struct with correctly isolated bucket context
             curator_result = %Librarian.Curator.Result{
@@ -368,7 +370,7 @@ defmodule Librarian.Consolidator do
             require Logger
 
             Logger.warning(
-              "Consolidation re-curation failed via #{inspect(curator_impl)}, skipping cluster. Reason: #{inspect(reason)}"
+              "Consolidation re-curation failed via #{inspect(curator_mod)}, skipping cluster. Reason: #{inspect(reason)}"
             )
 
             :ok

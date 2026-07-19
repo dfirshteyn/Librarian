@@ -179,6 +179,7 @@ defmodule Librarian.Curator.LlamaCpp do
   """
   def chat(prompt, opts \\ []) when is_binary(prompt) and is_list(opts) do
     url = Keyword.get(opts, :url, council_url())
+    model = Keyword.get(opts, :model, model_name())
     Librarian.LlamaPool.checkout(url)
 
     try do
@@ -201,7 +202,7 @@ defmodule Librarian.Curator.LlamaCpp do
       response_format = Keyword.get(opts, :response_format, %{"type" => "json_object"})
 
       body = %{
-        "model" => model_name(),
+        "model" => model,
         "messages" => messages,
         "response_format" => response_format,
         "temperature" => temperature,

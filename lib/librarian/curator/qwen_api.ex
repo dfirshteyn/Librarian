@@ -18,7 +18,7 @@ defmodule Librarian.Curator.QwenApi do
   @behaviour Librarian.Curator
 
   @base_url "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-  @model "qwen3.7-max-preview"
+  @default_model "qwen3.7-max-preview"
 
   @impl true
   def describe_image(image_data, opts \\ []) do
@@ -29,7 +29,7 @@ defmodule Librarian.Curator.QwenApi do
         "Describe this image in detail, including any text, objects, people, and the overall scene."
       )
 
-    model = vision_model()
+    model = Keyword.get(opts, :model, vision_model())
 
     api_key =
       Application.get_env(:librarian, :dashscope_api_key) ||
@@ -78,12 +78,12 @@ defmodule Librarian.Curator.QwenApi do
   end
 
   @impl true
-  @spec summarize(maybe_improper_list()) :: {:error, any()} | {:ok, Librarian.Curator.Result.t()}
-  def summarize(chunk) when is_list(chunk) do
+  @spec summarize(maybe_improper_list(), keyword()) :: {:error, any()} | {:ok, Librarian.Curator.Result.t()}
+  def summarize(chunk, opts \\ []) when is_list(chunk) do
     text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
 
-    with {:ok, body} <- chat(prompt),
+    with {:ok, body} <- chat(prompt, opts),
          {:ok, result} <- parse_result(body) do
       {:ok, result}
     end
@@ -109,7 +109,7 @@ defmodule Librarian.Curator.QwenApi do
   Returns a list of suggested actions (supersessions, tag updates,
   re-scoring) that the caller applies.
   """
-  def deep_pass(memories) when is_list(memories) do
+  def deep_pass(memories, opts \\ []) when is_list(memories) do
     text =
       memories
       |> Enum.with_index()
@@ -120,7 +120,7 @@ defmodule Librarian.Curator.QwenApi do
 
     {prompt, _} = Librarian.LeakGuard.scrub(build_deep_pass_prompt(text))
 
-    with {:ok, body} <- chat(prompt),
+    with {:ok, body} <- chat(prompt, opts),
          {:ok, actions} <- parse_deep_pass(body) do
       {:ok, actions}
     end
@@ -153,6 +153,8 @@ defmodule Librarian.Curator.QwenApi do
       Application.get_env(:librarian, :dashscope_api_key) ||
         raise "DASHSCOPE_API_KEY not set — export it or add to runtime.exs"
 
+    model = Keyword.get(opts, :model, @default_model)
+
     messages =
       case Keyword.get(opts, :system_prompt) do
         nil ->
@@ -171,14 +173,14 @@ defmodule Librarian.Curator.QwenApi do
       case temperature do
         nil ->
           %{
-            "model" => @model,
+            "model" => model,
             "messages" => messages,
             "response_format" => %{"type" => "json_object"}
           }
 
         _ ->
           %{
-            "model" => @model,
+            "model" => model,
             "messages" => messages,
             "response_format" => %{"type" => "json_object"},
             "temperature" => temperature

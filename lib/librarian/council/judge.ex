@@ -64,10 +64,11 @@ defmodule Librarian.Council.Judge do
     Respond with ONLY the raw JSON object. Do not wrap in markdown blocks like ```json.
     """
 
-    # Use QwenApi with moderate temperature for synthesis
+    # Use ModelRouting for judge synthesis (Qwen Plus by default)
+    {mod, model} = Librarian.ModelRouting.for(:council_judge)
     {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
 
-    case Librarian.Curator.QwenApi.chat(scrubbed_prompt, temperature: 0.5) do
+    case mod.chat(scrubbed_prompt, temperature: 0.5, model: model) do
       {:ok, body} ->
         parse_synthesis(body)
 

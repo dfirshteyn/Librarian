@@ -65,6 +65,7 @@ defmodule Librarian.Curator.Hybrid do
   Called by `Flusher.nightly_pass/1` on a schedule (not on the hot path).
   """
   def deep_pass(memories) do
-    Librarian.Curator.QwenApi.deep_pass(memories)
+    {_mod, model} = Librarian.ModelRouting.for(:deep_pass)
+    Librarian.Curator.QwenApi.deep_pass(memories, model: model)
   end
 end
