@@ -47,6 +47,7 @@ defmodule Librarian do
   def recall(query, user_id \\ @default_user, opts \\ []) do
     warm = WarmStore.recall(query, user_id, opts)
     warm = Enum.map(warm, fn m -> WarmStore.get(m.id) || m end)
+    warm = Enum.reject(warm, & &1.superseded_by)
 
     related =
       case warm do

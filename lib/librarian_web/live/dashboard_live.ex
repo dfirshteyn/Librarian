@@ -828,7 +828,7 @@ defmodule LibrarianWeb.DashboardLive do
     normalized_scope = String.downcase(scope)
     buckets = Librarian.list_buckets(tid)
     warm = WarmStore.all_for_user(tid) |> Enum.reject(& &1.superseded_by)
-    cold = Librarian.ColdStore.list_for_user(tid, 200)
+    cold = Librarian.ColdStore.list_for_user(tid, 10_000)
     hot = hot_counts(tid)
 
     selected =
