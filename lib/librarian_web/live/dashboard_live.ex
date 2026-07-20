@@ -96,13 +96,18 @@ defmodule LibrarianWeb.DashboardLive do
     tid = socket.assigns.tenant_id
     updated_socket = assign_memories(socket, tid)
 
+    fresh_insights = Librarian.morning_briefing(20)
+    insights_count = Enum.reject(fresh_insights, &String.starts_with?(&1["kind"], "consolidation_")) |> length()
+
     {:noreply,
      updated_socket
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:flush_progress, %{})
      |> assign(:new_memories, %{})
      |> assign(:private_count, length(updated_socket.assigns.memories))
-     |> assign(:telemetry, Librarian.Telemetry.snapshot(tid))}
+     |> assign(:telemetry, Librarian.Telemetry.snapshot(tid))
+     |> assign(:insights, fresh_insights)
+     |> assign(:insights_drawer_count, insights_count)}
   end
 
   def handle_info({:flush_progress, user_id, bucket, processed, total, memory}, socket) do
