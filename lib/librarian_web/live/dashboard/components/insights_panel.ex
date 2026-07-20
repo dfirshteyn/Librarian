@@ -25,7 +25,7 @@ defmodule LibrarianWeb.Dashboard.Components.InsightsPanel do
         </span>
       </h2>
       <div class="overflow-x-auto whitespace-nowrap pb-2 -mb-2">
-        <div class="flex gap-3 inline-flex">
+        <div class="gap-3 inline-flex">
           <%= if @deep_pass_insights == [] do %>
             <div class="flex-shrink-0 w-80 bg-gray-800 rounded p-3 border border-gray-700">
               <p class="text-xs text-gray-400">

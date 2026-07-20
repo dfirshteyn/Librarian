@@ -11,13 +11,13 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
     ~H"""
     <div class={"fixed inset-0 z-40 flex items-end justify-center pointer-events-none " <> if(@show, do: "", else: "hidden")}>
       <div class="absolute inset-0 bg-black/50 pointer-events-auto" phx-click="toggle_terminal"></div>
-      <div class={"relative w-full max-w-3xl bg-gray-900 border border-green-800 rounded-t-xl shadow-2xl pointer-events-auto transition-transform duration-300 " <>
-        if(@show, do: "translate-y-0 max-h-[70vh]", else: "translate-y-full")}
-        style={if(@show, do: "max-height: 70vh; overflow: hidden;", else: "")}>
+      <div class={"relative w-full max-w-4xl bg-gray-900 border border-green-800 rounded-t-xl shadow-2xl pointer-events-auto transition-transform duration-300 " <>
+        if(@show, do: "translate-y-0 max-h-[82vh]", else: "translate-y-full")}
+        style={if(@show, do: "max-height: 82vh; overflow: hidden;", else: "")}>
         <div class="flex items-center justify-between px-4 py-3 border-b border-green-900">
           <h2 class="text-sm font-bold text-green-300 uppercase tracking-wider">
-            💻 Structured Recall
-            <span class="text-green-600 text-[10px] ml-2">/model /recall /status</span>
+            💻 Recall Console
+            <span class="text-green-600 text-[10px] ml-2">ask, summarize, trace, demo</span>
           </h2>
           <button phx-click="toggle_terminal"
             class="text-gray-500 hover:text-gray-300 transition text-lg leading-none">
@@ -25,11 +25,28 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
           </button>
         </div>
         <div class="p-4 overflow-y-auto" style="max-height: calc(70vh - 52px);">
+          <div class="grid gap-3 md:grid-cols-[1.2fr_0.8fr] mb-3">
+            <div class="rounded-lg border border-green-900/70 bg-green-950/20 p-3">
+              <p class="text-green-300 text-xs font-bold uppercase tracking-wider">Demo-friendly memory lookup</p>
+              <p class="text-gray-400 text-xs mt-1 leading-relaxed">
+                Use this instead of scrolling. After a request flood flushes HOT → WARM and the deep pass consolidates, ask for a bucket summary or trace a topic back to raw captures.
+              </p>
+            </div>
+            <div class="rounded-lg border border-gray-800 bg-gray-950/70 p-3">
+              <p class="text-gray-500 text-[10px] uppercase tracking-wider mb-2">Try these live</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button type="button" phx-click="structured_recall" phx-value-command="/summary all" class="px-2 py-1 rounded bg-emerald-900/50 text-emerald-200 text-[11px] hover:bg-emerald-800/60">/summary all</button>
+                <button type="button" phx-click="structured_recall" phx-value-command="/summary project" class="px-2 py-1 rounded bg-emerald-900/50 text-emerald-200 text-[11px] hover:bg-emerald-800/60">/summary project</button>
+                <button type="button" phx-click="structured_recall" phx-value-command="/recall latency" class="px-2 py-1 rounded bg-cyan-900/50 text-cyan-200 text-[11px] hover:bg-cyan-800/60">/recall latency</button>
+              </div>
+            </div>
+          </div>
+
           <form phx-submit="structured_recall" class="mb-3">
             <div class="flex gap-2">
               <span class="text-green-400 text-sm font-bold">$></span>
               <input type="text" name="command"
-                placeholder="/model db perf | /trace deploy | /ancestry 12 | /status"
+                placeholder="/summary project | /recall customer auth | /trace deploy | /status"
                 class="flex-1 bg-gray-800 border border-green-900 rounded px-3 py-1.5 text-sm text-green-200 placeholder-gray-600 focus:outline-none focus:border-green-500" />
               <button type="submit"
                 class="px-3 py-1.5 bg-green-800 hover:bg-green-700 rounded text-sm transition text-green-200">
@@ -38,16 +55,18 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
             </div>
           </form>
 
-          <div class="bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs max-h-[50vh] overflow-y-auto">
+          <div class="bg-gray-950 rounded border border-gray-800 p-3 font-mono text-xs max-h-[58vh] overflow-y-auto">
             <%= if @structured_response do %>
               <.structured_response response={@structured_response} tenant_id={@tenant_id} />
             <% else %>
               <p class="text-gray-600">
-                Memory as a database. Type a command:
+                Memory as a database. Good demo flow: fire concurrent curl ingests, flush, consolidate, then retrieve the answer here.
               </p>
               <ul class="text-gray-600 mt-2 space-y-1">
+                <li><span class="text-emerald-600">/summary [all|bucket]</span> — one screen executive summary by tier and bucket</li>
                 <li><span class="text-green-600">/model [query]</span> — structured facts from matching memories</li>
                 <li><span class="text-cyan-600">/recall [query]</span> — search summaries with synaptic jumps</li>
+                <li><span class="text-violet-600">/trace [query]</span> — progressive disclosure from summary → chunks → raw source</li>
                 <li><span class="text-amber-600">/status</span> — tier counts for current session</li>
               </ul>
               <p class="text-gray-700 mt-3 text-[10px]">
@@ -60,8 +79,6 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
     </div>
     """
   end
-
-  # ── Structured Response Display ─────────────────────────────────────
 
   attr(:response, :map, required: true)
   attr(:tenant_id, :string, required: true)
@@ -131,6 +148,38 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
               <%= for s <- @response.related do %>
                 <li>• <%= s %></li>
               <% end %>
+            </ul>
+          <% end %>
+        </div>
+
+      <% "bucket_summary" -> %>
+        <div>
+          <p class="text-emerald-400 mb-2"><span class="text-emerald-600">SUMMARY:</span> <%= @response.scope %></p>
+          <div class="grid grid-cols-3 gap-2 mb-3 not-italic">
+            <div class="rounded bg-gray-900 border border-gray-800 p-2"><p class="text-gray-500">HOT</p><p class="text-orange-300 text-lg font-bold"><%= @response.totals.hot %></p></div>
+            <div class="rounded bg-gray-900 border border-gray-800 p-2"><p class="text-gray-500">WARM</p><p class="text-purple-300 text-lg font-bold"><%= @response.totals.warm %></p></div>
+            <div class="rounded bg-gray-900 border border-gray-800 p-2"><p class="text-gray-500">COLD</p><p class="text-blue-300 text-lg font-bold"><%= @response.totals.cold %></p></div>
+          </div>
+          <%= for b <- @response.buckets do %>
+            <div class="bg-gray-900 rounded p-2 mb-2 border-l-2 border-emerald-600">
+              <div class="flex items-center gap-2 mb-1">
+                <span class={"w-1.5 h-1.5 rounded-full #{bucket_color(b.name)}"} />
+                <span class="text-gray-200 font-bold"><%= b.name %></span>
+                <span class="text-gray-500 ml-auto"><%= b.hot %> hot · <%= b.warm %> warm · <%= b.cold %> cold</span>
+              </div>
+              <%= if b.recent != [] do %>
+                <ul class="text-gray-300 space-y-1">
+                  <%= for item <- b.recent do %><li>• <%= item %></li><% end %>
+                </ul>
+              <% else %>
+                <p class="text-gray-600">No curated memories yet. Ingest, flush, then summarize again.</p>
+              <% end %>
+            </div>
+          <% end %>
+          <%= if @response.insights != [] do %>
+            <p class="text-amber-500 mt-3 mb-1">RECENT DEEP-PASS INSIGHTS:</p>
+            <ul class="text-amber-200 space-y-1">
+              <%= for insight <- @response.insights do %><li>• <%= insight %></li><% end %>
             </ul>
           <% end %>
         </div>

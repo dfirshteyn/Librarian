@@ -66,19 +66,19 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:publish_confirm_id, nil)
      |> assign(:publish_confirm_synthesis, nil)
      |> assign(:active_bucket, "all")
-      |> assign(:show_terminal, false)
-      |> assign(:show_graph, false)
-      |> assign(:show_insights, false)
-      |> assign(:show_consolidation_history, false)
-      |> assign(:show_cold_store, false)
-      |> assign(:graph_mode, "public")
-      |> assign(
-        :private_count,
-        length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
-      )
-       |> assign(:public_count, 0)
-       |> assign(:insights_drawer_count, 0)
-       |> assign(:selected_node, nil)}
+     |> assign(:show_terminal, false)
+     |> assign(:show_graph, false)
+     |> assign(:show_insights, false)
+     |> assign(:show_consolidation_history, false)
+     |> assign(:show_cold_store, false)
+     |> assign(:graph_mode, "public")
+     |> assign(
+       :private_count,
+       length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
+     )
+     |> assign(:public_count, 0)
+     |> assign(:insights_drawer_count, 0)
+     |> assign(:selected_node, nil)}
   end
 
   @impl true
@@ -142,6 +142,7 @@ defmodule LibrarianWeb.DashboardLive do
       "into_id" => into_id,
       "similarity" => Float.round(sim, 2)
     }
+
     {:noreply, add_consolidation_event(socket, event)}
   end
 
@@ -151,6 +152,7 @@ defmodule LibrarianWeb.DashboardLive do
       "survivor_count" => survivors,
       "merged_count" => merged_count
     }
+
     {:noreply,
      socket
      |> add_consolidation_event(event)
@@ -159,6 +161,7 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info({:complete, survivors}, socket) do
     event = %{"kind" => "consolidation_complete", "survivor_count" => survivors}
+
     {:noreply,
      socket
      |> add_consolidation_event(event)
@@ -304,7 +307,9 @@ defmodule LibrarianWeb.DashboardLive do
     do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
 
   def handle_event("toggle_consolidation_history", _params, socket),
-    do: {:noreply, assign(socket, :show_consolidation_history, not socket.assigns.show_consolidation_history)}
+    do:
+      {:noreply,
+       assign(socket, :show_consolidation_history, not socket.assigns.show_consolidation_history)}
 
   def handle_event("toggle_cold_store", _params, socket),
     do: {:noreply, assign(socket, :show_cold_store, not socket.assigns.show_cold_store)}
@@ -384,6 +389,14 @@ defmodule LibrarianWeb.DashboardLive do
            results: r.results
          })}
 
+      ["/summary" | scope_parts] ->
+        scope = scope_parts |> Enum.join(" ") |> String.trim()
+        scope = if scope == "", do: "all", else: scope
+        {:noreply, assign(socket, :structured_response, bucket_summary(tid, scope))}
+
+      ["/demo"] ->
+        {:noreply, assign(socket, :structured_response, %{type: "demo_help"})}
+
       ["/ancestry" | id_parts] ->
         id_str = Enum.join(id_parts, " ")
 
@@ -414,7 +427,8 @@ defmodule LibrarianWeb.DashboardLive do
         {:noreply,
          assign(socket, :structured_response, %{
            type: "error",
-           message: "Unknown command. Use /model [query], /recall [query], or /status"
+           message:
+             "Unknown command. Use /summary [all|bucket], /recall [query], /trace [query], /model [query], /demo, or /status"
          })}
     end
   end
@@ -437,7 +451,12 @@ defmodule LibrarianWeb.DashboardLive do
       )
 
       Flusher.nightly_pass()
-      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, "all", socket.assigns.tenant_id})
+
+      Phoenix.PubSub.broadcast(
+        Librarian.PubSub,
+        "flush",
+        {:flushed, "all", socket.assigns.tenant_id}
+      )
     end)
 
     {:noreply, put_flash(socket, :info, "Nightly pass started (async)")}
@@ -805,6 +824,76 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply, socket}
   end
 
+  defp bucket_summary(tid, scope) do
+    normalized_scope = String.downcase(scope)
+    buckets = Librarian.list_buckets(tid)
+    warm = WarmStore.all_for_user(tid) |> Enum.reject(& &1.superseded_by)
+    cold = Librarian.ColdStore.list_for_user(tid, 200)
+    hot = hot_counts(tid)
+
+    selected =
+      if normalized_scope == "all" do
+        buckets
+      else
+        Enum.filter(buckets, &(String.downcase(&1.name) == normalized_scope))
+      end
+
+    bucket_rows =
+      selected
+      |> Enum.map(fn bucket ->
+        full_bucket = "#{tid}:#{bucket.name}"
+
+        warm_recent =
+          warm
+          |> Enum.filter(&(&1.bucket == full_bucket))
+          |> Enum.sort_by(& &1.created_at, {:desc, DateTime})
+          |> Enum.take(3)
+          |> Enum.map(& &1.summary)
+
+        cold_recent =
+          cold
+          |> Enum.filter(&(Librarian.Bucket.name_of(&1.bucket) == bucket.name))
+          |> Enum.take(2)
+          |> Enum.map(& &1.summary)
+
+        %{
+          name: bucket.name,
+          hot: Map.get(hot, full_bucket, 0),
+          warm: Enum.count(warm, &(&1.bucket == full_bucket)),
+          cold: Enum.count(cold, &(Librarian.Bucket.name_of(&1.bucket) == bucket.name)),
+          recent: Enum.uniq(warm_recent ++ cold_recent) |> Enum.take(4)
+        }
+      end)
+
+    totals = %{
+      hot: bucket_rows |> Enum.map(& &1.hot) |> Enum.sum(),
+      warm: bucket_rows |> Enum.map(& &1.warm) |> Enum.sum(),
+      cold: bucket_rows |> Enum.map(& &1.cold) |> Enum.sum()
+    }
+
+    insights =
+      Librarian.morning_briefing(5)
+      |> Enum.map(&format_insight/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.take(3)
+
+    %{
+      type: "bucket_summary",
+      scope: scope,
+      buckets: bucket_rows,
+      totals: totals,
+      insights: insights
+    }
+  end
+
+  defp format_insight(%{"insight" => insight}) when is_binary(insight), do: insight
+  defp format_insight(%{"summary" => summary}) when is_binary(summary), do: summary
+
+  defp format_insight(%{"kind" => kind} = insight),
+    do: "#{kind}: #{inspect(Map.delete(insight, "kind"))}"
+
+  defp format_insight(_), do: ""
+
   defp raw_for(id_str) when is_binary(id_str) do
     case Integer.parse(id_str) do
       {int_id, ""} ->
@@ -1030,7 +1119,8 @@ defmodule LibrarianWeb.DashboardLive do
     do: "Consolidation started: #{m["memory_count"]} memories in flight"
 
   defp insight_summary(%{"kind" => "consolidation_complete"} = m),
-    do: "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
+    do:
+      "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
 
   defp insight_summary(%{"kind" => "consolidation_skipped"} = m),
     do: "Consolidation skipped: #{m["reason"]} (#{m["count"]})"
