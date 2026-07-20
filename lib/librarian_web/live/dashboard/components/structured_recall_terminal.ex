@@ -186,12 +186,12 @@ defmodule LibrarianWeb.Dashboard.Components.StructuredRecallTerminal do
               <p class="text-gray-200 font-bold">#<%= card.summary_card.id %> · <%= card.summary_card.bucket %></p>
               <p class="text-gray-300"><%= card.summary_card.summary %></p>
 
-              <%= if card.raw_original do %>
-                <details class="mt-1">
-                  <summary class="text-emerald-500 text-[11px] cursor-pointer">View raw original</summary>
-                  <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(card.raw_original, 0, 600) %></pre>
-                </details>
-              <% end %>
+                          <%= if card.raw_original do %>
+                            <details class="mt-1">
+                              <summary class="text-emerald-500 text-[11px] cursor-pointer">View raw original</summary>
+                              <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1 max-h-48 overflow-y-auto"><%= card.raw_original %></pre>
+                            </details>
+                          <% end %>
 
               <%= if card.children != [] do %>
                 <p class="text-cyan-400 text-[11px] mt-1">↳ <%= length(card.children) %> chunk(s):</p>

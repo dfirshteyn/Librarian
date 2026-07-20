@@ -53,18 +53,18 @@ defmodule LibrarianWeb.Dashboard.Components.AncestryModal do
                        <% end %>
                        <span class="text-gray-600 text-xs ml-auto"><%= rel.created_at %></span>
                      </div>
-                     <%= if rel.source_raw do %>
-                       <details class="ml-4 mt-1">
-                         <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 source #<%= rel.source_id %> raw original</summary>
-                         <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(rel.source_raw, 0, 500) %></pre>
-                       </details>
-                     <% end %>
-                     <%= if rel.target_raw do %>
-                       <details class="ml-4 mt-1">
-                         <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 target #<%= rel.target_id %> raw original</summary>
-                         <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1"><%= String.slice(rel.target_raw, 0, 500) %></pre>
-                       </details>
-                     <% end %>
+                      <%= if rel.source_raw do %>
+                        <details class="ml-4 mt-1">
+                          <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 source #<%= rel.source_id %> raw original</summary>
+                          <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1 max-h-60 overflow-y-auto"><%= rel.source_raw %></pre>
+                        </details>
+                      <% end %>
+                      <%= if rel.target_raw do %>
+                        <details class="ml-4 mt-1">
+                          <summary class="text-emerald-500 text-[10px] cursor-pointer">🔗 target #<%= rel.target_id %> raw original</summary>
+                          <pre class="text-gray-500 text-[10px] whitespace-pre-wrap mt-1 max-h-60 overflow-y-auto"><%= rel.target_raw %></pre>
+                        </details>
+                      <% end %>
                    <% end %>
                 </div>
               </div>
