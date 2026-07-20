@@ -55,12 +55,35 @@ defmodule Librarian.HotStore do
     end
   end
 
+  @doc """
+  Drain all payloads from HOT ETS for a bucket. Returns the payloads.
+  Payloads removed from ETS remain in the WAL until explicitly truncated,
+  so they survive a crash via WAL replay.
+  """
   def drain(bucket) do
     case Registry.lookup(@registry, bucket) do
       [{pid, _}] -> GenServer.call(pid, :drain)
       [] -> []
     end
   end
+
+  @doc """
+  Drain up to `n` payloads from HOT ETS for a bucket, returning them
+  in FIFO order (oldest first). Leaves remaining payloads in ETS so
+  they stay visible in the UI.
+
+  Used by `Flusher.flush_bucket/2` to process payloads in small batches
+  rather than draining everything upfront, which avoids the "everything
+  disappeared from the UI" gap.
+  """
+  def drain_n(bucket, n) when n > 0 do
+    case Registry.lookup(@registry, bucket) do
+      [{pid, _}] -> GenServer.call(pid, {:drain_n, n})
+      [] -> []
+    end
+  end
+
+  def drain_n(_bucket, _n), do: []
 
   def buckets do
     Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
@@ -277,6 +300,16 @@ defmodule Librarian.HotStore do
     items = table |> :ets.tab2list() |> Enum.map(fn {_seq, payload} -> payload end)
     :ets.delete_all_objects(table)
     {:reply, items, state}
+  end
+
+  @impl true
+  def handle_call({:drain_n, n}, _from, %{table: table} = state) do
+    # ETS ordered_set returns entries in key (seq) order via tab2list.
+    # Take the oldest n entries in FIFO order.
+    items = table |> :ets.tab2list() |> Enum.take(n)
+    payloads = Enum.map(items, fn {_seq, payload} -> payload end)
+    Enum.each(items, fn {seq, _} -> :ets.delete(table, seq) end)
+    {:reply, payloads, state}
   end
 
   @impl true

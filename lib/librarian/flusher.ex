@@ -9,11 +9,16 @@ defmodule Librarian.Flusher do
       Librarian.Flusher.flush_all()                # every active bucket
       Librarian.Flusher.archive_stale()            # WARM -> COLD, low importance
 
-  The flusher is a pure APPEND-ONLY write path — it drains HOT, runs the
-  curator for summarization/embedding, and writes to WARM. All semantic
-  deduplication, contradiction resolution, and supersession is handled
-  asynchronously by the tournament-bracket consolidator, which uses real
-  cosine similarity (not a tag-heuristic threshold) to merge clusters.
+  The flusher is a pure APPEND-ONLY write path — it drains HOT in small
+  batches, runs the curator for summarization/embedding, and writes to
+  WARM. Each batch is drained from HOT only after its outcome (success
+  or failure-requeue) is confirmed, so payloads never "disappear" from
+  the UI while processing.
+
+  All semantic deduplication, contradiction resolution, and supersession
+  is handled asynchronously by the tournament-bracket consolidator, which
+  uses real cosine similarity (not a tag-heuristic threshold) to merge
+  clusters.
 
   ## Progress Reporting
 
@@ -24,151 +29,50 @@ defmodule Librarian.Flusher do
 
   @max_flush_timeout 150_000
 
+  # How many payloads to drain and process concurrently per batch.
+  # Matches LlamaPool's default slot count (4) so we never fire more
+  # concurrent curator calls than the pool can handle.
+  @batch_size 4
+
   # Agent for tracking flush progress across processes
 
   @doc """
-  Drain one HOT bucket's payloads and run each through the curator, storing
-  the result in WARM under the *curator-assigned* bucket (not the HOT
-  staging bucket name). The HOT bucket is just a per-user buffer
+  Drain HOT payloads in small batches and run each through the curator,
+  storing the result in WARM under the *curator-assigned* bucket (not the
+  HOT staging bucket name). The HOT bucket is just a per-user buffer
   ("user_id:inbox"); the semantic bucket decision belongs to the curator
   at flush time, which is what lets the model override the old ingest-time
   keyword routing.
+
+  Processes in batches of `@batch_size` (default 4). Each batch is drained
+  from HOT only when its processing starts, so remaining payloads stay
+  visible in the UI. Failed payloads are re-queued to HOT immediately.
 
   Passes `progress_callback: fun` in opts for incremental progress reporting.
   The callback receives `{bucket, processed, total, memory}` after each success.
   """
   def flush_bucket(bucket, opts \\ []) do
-    case Librarian.HotStore.drain(bucket) do
-      [] ->
+    case Librarian.HotStore.count(bucket) do
+      0 ->
         :empty
 
-      payloads ->
+      total ->
         progress_callback = Keyword.get(opts, :progress_callback)
         user_id = bucket |> String.split(":") |> hd()
 
-        # Initialize progress tracking
+        # Initialize progress tracking with the total count
         if progress_callback do
-          Librarian.FlushProgressAgent.init_progress(user_id, bucket, length(payloads))
+          Librarian.FlushProgressAgent.init_progress(user_id, bucket, total)
         end
 
         require Logger
         curator_impl = Librarian.Curator.resolve_curator(user_id, opts)
 
         Logger.debug(
-          "[Flusher] Flushing #{length(payloads)} payloads from #{bucket} via #{inspect(curator_impl)}"
+          "[Flusher] Flushing bucket #{bucket} with #{total} payloads in batches of #{@batch_size}"
         )
 
-        results =
-          payloads
-          |> Task.async_stream(
-            fn payload ->
-              case Librarian.Curator.summarize([payload], curator_impl) do
-                {:ok, result} ->
-                  result =
-                    case Librarian.Curator.embed(result.summary, curator_impl) do
-                      {:ok, vec} ->
-                        %{result | embedding: vec}
-
-                      {:error, embed_err} ->
-                        Logger.warning(
-                          "[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload"
-                        )
-
-                        # Put this payload back so a curator/embed failure loses nothing.
-                        # Mirrors the summarize-failure branch: the memory is NOT stored,
-                        # it's excluded from `succeeded`, and the WAL stays intact so it
-                        # retries on the next flush once the embedding server is back.
-                        Librarian.HotStore.put(bucket, payload)
-                        {:error, embed_err}
-                    end
-
-                  normalized =
-                    Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
-
-                  warm_bucket = "#{user_id}:#{normalized}"
-
-                  # Scrub payload.raw_text before storing as raw_original in WARM.
-                  # HOT's ETS intentionally keeps unscrubbed text for performance,
-                  # but WARM/COLD are durable user-visible layers that must be clean.
-                  {scrubbed_original, redact_count} = Librarian.LeakGuard.scrub(payload.raw_text)
-
-                  if redact_count > 0 do
-                    require Logger
-
-                    Logger.warning(
-                      "[Flusher] Redacted #{redact_count} secret(s) from raw_original before WARM storage"
-                    )
-                  end
-
-                  # Link the scrubbed raw capture to the memory so progressive
-                  # disclosure can pull the clean original instantly on a
-                  # vector match — without embedding it into the index.
-                  memory =
-                    Librarian.WarmStore.put(warm_bucket, result,
-                      correlation_id: payload.parent_id,
-                      raw_original: scrubbed_original,
-                      file_type: payload.file_type,
-                      stored_path: payload.stored_path,
-                      dimensions: payload.dimensions
-                    )
-
-                  Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
-
-                  # Log ancestry so the HOT→WARM transition is visible in the
-                  # ancestry modal. For chunked docs the edge points at the HOT
-                  # correlation id (the synthetic parent's origin); for normal
-                  # ingests it points at the HOT bucket that was just drained.
-                  origin =
-                    if payload.parent_id do
-                      "hot:#{payload.parent_id}"
-                    else
-                      "hot:#{bucket}"
-                    end
-
-                  Librarian.ColdStore.log_relationship(
-                    to_string(memory.id),
-                    origin,
-                    "derived_from",
-                    user_id,
-                    %{bucket: bucket, parent_id: payload.parent_id}
-                  )
-
-                  # Notify ChunkTracker if this was a chunked payload
-                  if payload.parent_id do
-                    Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
-                  end
-
-                  # Report progress incrementally
-                  if progress_callback do
-                    Librarian.FlushProgressAgent.report_progress(
-                      user_id,
-                      bucket,
-                      memory,
-                      progress_callback
-                    )
-                  end
-
-                  {:ok, memory}
-
-                {:error, reason} ->
-                  Logger.warning(
-                    "[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload"
-                  )
-
-                  # Put this payload back so a curator failure loses nothing.
-                  # Use synchronous put to ensure WAL is written before truncate.
-                  Librarian.HotStore.put_deterministic(bucket, payload)
-                  {:error, reason}
-              end
-            end,
-            timeout: @max_flush_timeout,
-            on_timeout: :kill_task,
-            max_concurrency: length(payloads)
-          )
-          |> Enum.map(fn
-            {:ok, result} -> result
-            {:exit, _reason} -> {:error, :timeout}
-          end)
+        results = process_in_batches(bucket, user_id, curator_impl, progress_callback, [])
 
         succeeded = Enum.filter(results, &match?({:ok, _}, &1))
         failed = Enum.filter(results, &match?({:error, _}, &1))
@@ -185,6 +89,151 @@ defmodule Librarian.Flusher do
         case succeeded do
           [] -> {:error, :all_failed}
           ok -> {:ok, Enum.map(ok, fn {:ok, m} -> m end)}
+        end
+    end
+  end
+
+  # Process payloads in batches: drain a batch from HOT, process concurrently,
+  # then repeat until HOT is empty.
+  defp process_in_batches(bucket, user_id, curator_impl, progress_callback, acc) do
+    require Logger
+
+    batch = Librarian.HotStore.drain_n(bucket, @batch_size)
+
+    case batch do
+      [] ->
+        acc
+
+      payloads ->
+        Logger.debug(
+          "[Flusher] Processing batch of #{length(payloads)} (remaining: #{Librarian.HotStore.count(bucket)})"
+        )
+
+        batch_results =
+          payloads
+          |> Task.async_stream(
+            fn payload ->
+              process_payload(bucket, user_id, payload, curator_impl, progress_callback)
+            end,
+            timeout: @max_flush_timeout,
+            on_timeout: :kill_task,
+            max_concurrency: @batch_size
+          )
+          |> Enum.map(fn
+            {:ok, result} -> result
+            {:exit, _reason} -> {:error, :timeout}
+          end)
+
+        # Re-queue any failed payloads back to HOT
+        Enum.each(batch_results, fn
+          {:error, _reason} -> :ok
+          _ -> :ok
+        end)
+
+        process_in_batches(bucket, user_id, curator_impl, progress_callback, acc ++ batch_results)
+    end
+  end
+
+  defp process_payload(bucket, user_id, payload, curator_impl, progress_callback) do
+    require Logger
+
+    case Librarian.Curator.summarize([payload], curator_impl) do
+      {:error, reason} ->
+        Logger.warning(
+          "[Flusher] Summarize failed for bucket=#{bucket}: #{inspect(reason)} — re-queuing payload"
+        )
+
+        # Put this payload back so a curator failure loses nothing.
+        # Use synchronous put to ensure WAL is written before truncate.
+        Librarian.HotStore.put_deterministic(bucket, payload)
+        {:error, reason}
+
+      {:ok, result} ->
+        case Librarian.Curator.embed(result.summary, curator_impl) do
+          {:error, embed_err} ->
+            require Logger
+
+            Logger.warning(
+              "[Flusher] Embed failed for bucket=#{bucket}: #{inspect(embed_err)} — re-queuing payload"
+            )
+
+            # Put this payload back so a curator/embed failure loses nothing.
+            # The memory is NOT stored, excluded from succeeded, and the
+            # WAL stays intact so it retries on the next flush once the
+            # embedding server is back.
+            Librarian.HotStore.put_deterministic(bucket, payload)
+            {:error, embed_err}
+
+          {:ok, vec} ->
+            result = %{result | embedding: vec}
+
+            normalized =
+              Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+
+            warm_bucket = "#{user_id}:#{normalized}"
+
+            # Scrub payload.raw_text before storing as raw_original in WARM.
+            # HOT's ETS intentionally keeps unscrubbed text for performance,
+            # but WARM/COLD are durable user-visible layers that must be clean.
+            {scrubbed_original, redact_count} = Librarian.LeakGuard.scrub(payload.raw_text)
+
+            if redact_count > 0 do
+              require Logger
+
+              Logger.warning(
+                "[Flusher] Redacted #{redact_count} secret(s) from raw_original before WARM storage"
+              )
+            end
+
+            # Link the scrubbed raw capture to the memory so progressive
+            # disclosure can pull the clean original instantly on a
+            # vector match — without embedding it into the index.
+            memory =
+              Librarian.WarmStore.put(warm_bucket, result,
+                correlation_id: payload.parent_id,
+                raw_original: scrubbed_original,
+                file_type: payload.file_type,
+                stored_path: payload.stored_path,
+                dimensions: payload.dimensions
+              )
+
+            Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
+
+            # Log ancestry so the HOT→WARM transition is visible in the
+            # ancestry modal. For chunked docs the edge points at the HOT
+            # correlation id (the synthetic parent's origin); for normal
+            # ingests it points at the HOT bucket that was just drained.
+            origin =
+              if payload.parent_id do
+                "hot:#{payload.parent_id}"
+              else
+                "hot:#{bucket}"
+              end
+
+            Librarian.ColdStore.log_relationship(
+              to_string(memory.id),
+              origin,
+              "derived_from",
+              user_id,
+              %{bucket: bucket, parent_id: payload.parent_id}
+            )
+
+            # Notify ChunkTracker if this was a chunked payload
+            if payload.parent_id do
+              Librarian.ChunkTracker.chunk_flushed(payload.parent_id, memory.id)
+            end
+
+            # Report progress incrementally
+            if progress_callback do
+              Librarian.FlushProgressAgent.report_progress(
+                user_id,
+                bucket,
+                memory,
+                progress_callback
+              )
+            end
+
+            {:ok, memory}
         end
     end
   end
