@@ -423,40 +423,59 @@ defmodule Librarian.ColdStore do
   def valid_bucket_names(user_id) when is_binary(user_id) do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
 
-    # Seed default buckets if this is a new database
-    seed_default_buckets(conn)
+    # Handle nil connection gracefully (for anonymous users if DB init fails)
+    if is_nil(conn) do
+      require Logger
 
-    # Try to query, but fall back to defaults on error (for anonymous users with fresh DBs)
-    case Exqlite.query(conn, "SELECT name FROM buckets WHERE deleted_at IS NULL", []) do
-      {:ok, %{rows: rows}} ->
-        rows |> Enum.map(fn [name] -> name end)
+      Logger.warning(
+        "[ColdStore] No connection for #{user_id}, using default bucket names"
+      )
+
+      @default_buckets
+    else
+      # Seed default buckets if this is a new database
+      seed_default_buckets(conn)
+
+      # Try to query, but fall back to defaults on error (for anonymous users with fresh DBs)
+      case Exqlite.query(conn, "SELECT name FROM buckets WHERE deleted_at IS NULL", []) do
+        {:ok, %{rows: rows}} ->
+          rows |> Enum.map(fn [name] -> name end)
+
+        {:error, reason} ->
+          require Logger
+
+          Logger.warning(
+            "[ColdStore] Failed to get bucket names for #{user_id}, using defaults: #{inspect(reason)}"
+          )
+
+          @default_buckets
+      end
+    end
+  end
+  defp seed_default_buckets(conn) do
+    case Exqlite.query(conn, "SELECT COUNT(*) FROM buckets", []) do
+      {:ok, %{rows: [[count]]}} ->
+        if count == 0 do
+          Enum.each(@default_buckets, fn name ->
+            Exqlite.query(
+              conn,
+              "INSERT OR IGNORE INTO buckets (name, display_name) VALUES (?1, ?1)",
+              [name]
+            )
+          end)
+        end
+
+        :ok
 
       {:error, reason} ->
         require Logger
 
         Logger.warning(
-          "[ColdStore] Failed to get bucket names for #{user_id}, using defaults: #{inspect(reason)}"
+          "[ColdStore] Failed to seed default buckets: #{inspect(reason)}"
         )
 
-        @default_buckets
+        :ok
     end
-  end
-
-  defp seed_default_buckets(conn) do
-    {:ok, %{rows: [[count]]}} =
-      Exqlite.query(conn, "SELECT COUNT(*) FROM buckets", [])
-
-    if count == 0 do
-      Enum.each(@default_buckets, fn name ->
-        Exqlite.query(
-          conn,
-          "INSERT OR IGNORE INTO buckets (name, display_name) VALUES (?1, ?1)",
-          [name]
-        )
-      end)
-    end
-
-    :ok
   end
 
   # ── Memory archive (SQLite) ────────────────────────────────────────
