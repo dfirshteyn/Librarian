@@ -28,47 +28,51 @@ defmodule LibrarianWeb.DashboardLive do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
     end
 
-     {:ok,
-      socket
-      |> assign(:hot_payloads, HotStore.feed_entries_for_user(tenant_id))
-      |> assign(:feed_empty, false)
-      |> assign(:tenant_id, tenant_id)
-      |> assign(:tier, tier)
-      |> assign(:force_local, false)
-      |> assign_memories(tenant_id)
-      |> assign(:hot_counts, hot_counts(tenant_id))
-      |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tenant_id))
-      |> assign(
-        :auto_consolidation_enabled,
-        Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
-      )
-      |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tenant_id))
-      |> assign(:query, "")
-      |> assign(:recall_results, nil)
-      |> assign(:insights, Librarian.morning_briefing(20))
-      |> assign(:ingest_text, "")
-      |> assign(:ingest_bucket, "inbox")
-      |> assign(:expanded_memories, MapSet.new())
-      |> assign(:demo_running, false)
-      |> assign(:demo_total, 0)
-      |> assign(:ancestry_memory_id, nil)
-      |> assign(:ancestry_tree, [])
-      |> assign(:structured_response, nil)
-      |> assign(:council_pending, MapSet.new())
-      |> assign(:publish_pending, MapSet.new())
-      |> assign(:delegation_progress, %{})
-      |> assign(:flush_progress, %{})
-      |> assign(:new_memories, %{})
-      |> assign(:publish_confirm_id, nil)
-      |> assign(:publish_confirm_synthesis, nil)
-      |> assign(:active_bucket, "all")
-      |> assign(:show_terminal, false)
-      |> assign(:show_graph, false)
-      |> assign(:show_insights, false)
-      |> assign(:graph_mode, "public")
-      |> assign(:private_count, length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)))
-      |> assign(:public_count, 0)
-      |> assign(:insights_drawer_count, 0)}
+    {:ok,
+     socket
+     |> assign(:hot_payloads, HotStore.feed_entries_for_user(tenant_id))
+     |> assign(:feed_empty, false)
+     |> assign(:tenant_id, tenant_id)
+     |> assign(:tier, tier)
+     |> assign(:force_local, false)
+     |> assign_memories(tenant_id)
+     |> assign(:hot_counts, hot_counts(tenant_id))
+     |> assign(:telemetry, Librarian.Telemetry.snapshot(tenant_id))
+     |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tenant_id))
+     |> assign(
+       :auto_consolidation_enabled,
+       Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
+     )
+     |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tenant_id))
+     |> assign(:query, "")
+     |> assign(:recall_results, nil)
+     |> assign(:insights, Librarian.morning_briefing(20))
+     |> assign(:ingest_text, "")
+     |> assign(:ingest_bucket, "inbox")
+     |> assign(:expanded_memories, MapSet.new())
+     |> assign(:demo_running, false)
+     |> assign(:demo_total, 0)
+     |> assign(:ancestry_memory_id, nil)
+     |> assign(:ancestry_tree, [])
+     |> assign(:structured_response, nil)
+     |> assign(:council_pending, MapSet.new())
+     |> assign(:publish_pending, MapSet.new())
+     |> assign(:delegation_progress, %{})
+     |> assign(:flush_progress, %{})
+     |> assign(:new_memories, %{})
+     |> assign(:publish_confirm_id, nil)
+     |> assign(:publish_confirm_synthesis, nil)
+     |> assign(:active_bucket, "all")
+     |> assign(:show_terminal, false)
+     |> assign(:show_graph, false)
+     |> assign(:show_insights, false)
+     |> assign(:graph_mode, "public")
+     |> assign(
+       :private_count,
+       length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
+     )
+     |> assign(:public_count, 0)
+     |> assign(:insights_drawer_count, 0)}
   end
 
   @impl true
@@ -78,7 +82,8 @@ defmodule LibrarianWeb.DashboardLive do
     {:noreply,
      socket
      |> assign(:hot_payloads, HotStore.feed_entries_for_user(tid))
-     |> assign(:hot_counts, hot_counts(tid))}
+     |> assign(:hot_counts, hot_counts(tid))
+     |> assign(:telemetry, Librarian.Telemetry.snapshot(tid))}
   end
 
   def handle_info({:flushed, _bucket, _user_id}, socket) do
@@ -90,7 +95,8 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:flush_progress, %{})
      |> assign(:new_memories, %{})
-     |> assign(:private_count, length(updated_socket.assigns.memories))}
+     |> assign(:private_count, length(updated_socket.assigns.memories))
+     |> assign(:telemetry, Librarian.Telemetry.snapshot(tid))}
   end
 
   def handle_info({:flush_progress, user_id, bucket, processed, total, memory}, socket) do
@@ -210,10 +216,12 @@ defmodule LibrarianWeb.DashboardLive do
       cond do
         socket.assigns.show_graph ->
           # Drawer already open, just trigger update and set private count
-          :ok = send_update(LibrarianWeb.Dashboard.Components.PrivateGraph,
-            id: "private_graph",
-            tenant_id: socket.assigns.tenant_id
-          )
+          :ok =
+            send_update(LibrarianWeb.Dashboard.Components.PrivateGraph,
+              id: "private_graph",
+              tenant_id: socket.assigns.tenant_id
+            )
+
           socket
           |> assign(:private_count, length(socket.assigns.memories))
 
@@ -723,6 +731,7 @@ defmodule LibrarianWeb.DashboardLive do
       |> assign(:memories, WarmStore.all_for_user(tid) |> Enum.reject(& &1.superseded_by))
       |> assign(:superseded_count, WarmStore.superseded_count_for_user(tid))
       |> assign(:cold_count, Librarian.ColdStore.count(tid))
+      |> assign(:telemetry, Librarian.Telemetry.snapshot(tid))
 
   defp hot_counts(tid) do
     p = tid <> ":"
@@ -773,7 +782,7 @@ defmodule LibrarianWeb.DashboardLive do
 
     ~H"""
     <div class="h-screen bg-gray-950 text-gray-100 font-mono p-4 flex flex-col overflow-hidden">
-      <.header tenant_id={@tenant_id} tier={@tier} force_local={@force_local} demo_running={@demo_running} />
+      <.header tenant_id={@tenant_id} tier={@tier} force_local={@force_local} demo_running={@demo_running} telemetry={@telemetry} />
       <.control_strip auto_consolidation_enabled={@auto_consolidation_enabled} auto_flush_enabled={@auto_flush_enabled} nightly_pass_enabled={@nightly_pass_enabled} hot_counts={@hot_counts} active_bucket={@active_bucket} tier={@tier} force_local={@force_local} warm_count={length(@memories)} cold_count={@cold_count} />
       <div class="flex gap-2 mb-3 flex-wrap items-center">
         <span class="text-[10px] text-gray-500 uppercase tracking-widest mr-1">Lanes</span>
