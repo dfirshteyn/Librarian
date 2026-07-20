@@ -23,6 +23,9 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
   def insight_icon("supersession"), do: "🔄"
   def insight_icon("deep_supersession"), do: "⚠️"
   def insight_icon("deep_cross_connection"), do: "🔗"
+  def insight_icon("consolidation_started"), do: "🔄"
+  def insight_icon("consolidation_complete"), do: "✅"
+  def insight_icon("consolidation_skipped"), do: "⏭️"
   def insight_icon(_), do: "💡"
 
   def insight_summary(%{"kind" => "supersession"} = m),
@@ -33,6 +36,15 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
 
   def insight_summary(%{"kind" => "deep_cross_connection"} = m),
     do: "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
+
+  def insight_summary(%{"kind" => "consolidation_started"} = m),
+    do: "Consolidation started: #{m["memory_count"]} memories in flight"
+
+  def insight_summary(%{"kind" => "consolidation_complete"} = m),
+    do: "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
+
+  def insight_summary(%{"kind" => "consolidation_skipped"} = m),
+    do: "Consolidation skipped: #{m["reason"]} (#{m["count"]})"
 
   def insight_summary(m), do: inspect(m)
 

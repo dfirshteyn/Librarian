@@ -27,6 +27,7 @@ defmodule LibrarianWeb.DashboardLive do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "flush_progress")
       Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
+      Phoenix.PubSub.subscribe(Librarian.PubSub, "consolidation:#{tenant_id}")
     end
 
     {:ok,
@@ -124,6 +125,36 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info({:nightly_pass_toggled, new_val}, socket) do
     {:noreply, assign(socket, :nightly_pass_enabled, new_val)}
+  end
+
+  def handle_info({:spawned, count}, socket) do
+    {:noreply, put_flash(socket, :info, "🔄 Consolidation started: #{count} memories")}
+  end
+
+  def handle_info({:merged, from_id, into_id, sim, _preview_a, _preview_b}, socket) do
+    {:noreply,
+     put_flash(socket, :info, "🔗 Merged ##{from_id} → ##{into_id} (sim: #{Float.round(sim, 2)})")}
+  end
+
+  def handle_info({:complete, survivors, merged_count}, socket) do
+    msg =
+      if merged_count > 0 do
+        "✅ Consolidation complete: #{survivors} survivors, #{merged_count} merged"
+      else
+        "✅ Consolidation complete: #{survivors} survivors, no merges needed"
+      end
+
+    {:noreply,
+     socket
+     |> put_flash(:info, msg)
+     |> assign_memories(socket.assigns.tenant_id)}
+  end
+
+  def handle_info({:complete, survivors}, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:info, "✅ Consolidation complete: #{survivors} survivors")
+     |> assign_memories(socket.assigns.tenant_id)}
   end
 
   def handle_info(:refresh_graph, socket) do
@@ -875,7 +906,7 @@ defmodule LibrarianWeb.DashboardLive do
               <%= for insight <- @insights do %>
                 <div class="bg-gray-800 rounded p-3 border border-gray-700">
                   <div class="flex items-center gap-2 mb-1">
-                    <span class="text-xs"><%= case insight["kind"] do "supersession" -> "🔄"; "deep_supersession" -> "⚠️"; "deep_cross_connection" -> "🔗"; _ -> "💡" end %></span>
+                    <span class="text-xs"><%= insight_icon(insight["kind"]) %></span>
                     <span class="text-xs text-gray-400"><%= insight["kind"] %></span>
                     <span class="text-xs text-gray-600 ml-auto"><%= insight["logged_at"] %></span>
                   </div>
@@ -901,6 +932,14 @@ defmodule LibrarianWeb.DashboardLive do
   defp bucket_icon("finance"), do: "💰"
   defp bucket_icon(_), do: "📂"
 
+  defp insight_icon("supersession"), do: "🔄"
+  defp insight_icon("deep_supersession"), do: "⚠️"
+  defp insight_icon("deep_cross_connection"), do: "🔗"
+  defp insight_icon("consolidation_started"), do: "🔄"
+  defp insight_icon("consolidation_complete"), do: "✅"
+  defp insight_icon("consolidation_skipped"), do: "⏭️"
+  defp insight_icon(_), do: "💡"
+
   defp insight_summary(%{"kind" => "supersession"} = m),
     do: "Superseded: \"#{m["old_summary"]}\" → \"#{m["new_summary"]}\""
 
@@ -909,6 +948,15 @@ defmodule LibrarianWeb.DashboardLive do
 
   defp insight_summary(%{"kind" => "deep_cross_connection"} = m),
     do: "Qwen connected ##{m["id_a"]} ↔ ##{m["id_b"]}: #{m["note"]}"
+
+  defp insight_summary(%{"kind" => "consolidation_started"} = m),
+    do: "Consolidation started: #{m["memory_count"]} memories in flight"
+
+  defp insight_summary(%{"kind" => "consolidation_complete"} = m),
+    do: "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
+
+  defp insight_summary(%{"kind" => "consolidation_skipped"} = m),
+    do: "Consolidation skipped: #{m["reason"]} (#{m["count"]})"
 
   defp insight_summary(m), do: inspect(m)
 end

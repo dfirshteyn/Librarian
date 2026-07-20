@@ -11,7 +11,7 @@ defmodule Librarian.Consolidator do
   memories are flagged as superseded in the WarmStore.
   """
 
-  @similarity_threshold 0.80
+  @similarity_threshold 0.75
   @recuration_timeout 60_000
 
   @doc ~S"""
@@ -43,15 +43,31 @@ defmodule Librarian.Consolidator do
       end)
 
     if length(memories) < 2 do
+      Librarian.ColdStore.log_insight(%{
+        "kind" => "consolidation_skipped",
+        "user_id" => user_id,
+        "reason" => "not enough memories",
+        "count" => length(memories),
+        "logged_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
       Phoenix.PubSub.broadcast(
         Librarian.PubSub,
         "consolidation:#{user_id}",
-        {:complete, length(memories)}
+        {:complete, length(memories), 0}
       )
 
       :noop
     else
       shuffled = Enum.shuffle(memories)
+
+      Librarian.ColdStore.log_insight(%{
+        "kind" => "consolidation_started",
+        "user_id" => user_id,
+        "memory_count" => length(shuffled),
+        "bucket_filter" => bucket_filter,
+        "logged_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
 
       Phoenix.PubSub.broadcast(
         Librarian.PubSub,
@@ -100,10 +116,27 @@ defmodule Librarian.Consolidator do
 
       survivors = Enum.map(final_clusters, fn {mem, _ids} -> mem end)
 
+      merged_count = length(Enum.filter(final_clusters, fn {_mem, ids} -> length(ids) > 1 end))
+      total_originals =
+        final_clusters
+        |> Enum.flat_map(fn {_mem, ids} -> ids end)
+        |> Enum.uniq()
+        |> length()
+
+      Librarian.ColdStore.log_insight(%{
+        "kind" => "consolidation_complete",
+        "user_id" => user_id,
+        "initial_count" => length(shuffled),
+        "survivor_count" => length(survivors),
+        "merged_clusters" => merged_count,
+        "total_originals" => total_originals,
+        "logged_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
       Phoenix.PubSub.broadcast(
         Librarian.PubSub,
         "consolidation:#{user_id}",
-        {:complete, length(survivors)}
+        {:complete, length(survivors), merged_count}
       )
 
       {:ok, survivors}
