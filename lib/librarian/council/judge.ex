@@ -68,7 +68,7 @@ defmodule Librarian.Council.Judge do
     {mod, model} = Librarian.ModelRouting.for(:council_judge)
     {scrubbed_prompt, _} = Librarian.LeakGuard.scrub(prompt)
 
-    case mod.chat(scrubbed_prompt, temperature: 0.5, model: model) do
+    case mod.chat(scrubbed_prompt, temperature: 0.5, model: model, response_format: %{"type" => "json_object"}) do
       {:ok, body} ->
         parse_synthesis(body)
 

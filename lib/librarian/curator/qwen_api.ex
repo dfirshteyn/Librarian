@@ -83,7 +83,7 @@ defmodule Librarian.Curator.QwenApi do
     text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
 
-    with {:ok, body} <- chat(prompt, opts),
+    with {:ok, body} <- chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
          {:ok, result} <- parse_result(body) do
       {:ok, result}
     end
@@ -120,7 +120,7 @@ defmodule Librarian.Curator.QwenApi do
 
     {prompt, _} = Librarian.LeakGuard.scrub(build_deep_pass_prompt(text))
 
-    with {:ok, body} <- chat(prompt, opts),
+    with {:ok, body} <- chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
          {:ok, actions} <- parse_deep_pass(body) do
       {:ok, actions}
     end
@@ -168,22 +168,36 @@ defmodule Librarian.Curator.QwenApi do
       end
 
     temperature = Keyword.get(opts, :temperature)
+    response_format = Keyword.get(opts, :response_format)
 
     body =
-      case temperature do
-        nil ->
+      cond do
+        temperature && response_format ->
           %{
             "model" => model,
             "messages" => messages,
-            "response_format" => %{"type" => "json_object"}
+            "response_format" => response_format,
+            "temperature" => temperature
           }
 
-        _ ->
+        temperature ->
           %{
             "model" => model,
             "messages" => messages,
-            "response_format" => %{"type" => "json_object"},
             "temperature" => temperature
+          }
+
+        response_format ->
+          %{
+            "model" => model,
+            "messages" => messages,
+            "response_format" => response_format
+          }
+
+        true ->
+          %{
+            "model" => model,
+            "messages" => messages
           }
       end
 
