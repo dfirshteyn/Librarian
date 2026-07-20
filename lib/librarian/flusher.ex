@@ -199,6 +199,15 @@ defmodule Librarian.Flusher do
 
             Logger.debug("[Flusher] Stored memory id=#{memory.id} in #{warm_bucket}")
 
+            if redact_count > 0 do
+              Librarian.ColdStore.log_insight(%{
+                "kind" => "grounding_intervention",
+                "memory_id" => memory.id,
+                "redaction_count" => redact_count,
+                "user_id" => user_id
+              })
+            end
+
             # Log ancestry so the HOT→WARM transition is visible in the
             # ancestry modal. For chunked docs the edge points at the HOT
             # correlation id (the synthetic parent's origin); for normal

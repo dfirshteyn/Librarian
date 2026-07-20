@@ -814,7 +814,7 @@ defmodule LibrarianWeb.DashboardLive do
         progress_callback: &Librarian.FlushProgressAgent.report_progress/4
       )
 
-      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, "all", tid})
     end)
 
     {:noreply,
