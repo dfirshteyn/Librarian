@@ -257,9 +257,9 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
           <span class="text-gray-500">(becomes locked at publish)</span>
         </div>
       <% end %>
-      <%= if @takes != %{} do %>
-        <details class="text-xs">
-          <summary class="text-violet-300 cursor-pointer select-none">View persona perspectives</summary>
+        <%= if @takes != %{} do %>
+        <details class="text-xs" phx-no-propagate>
+          <summary class="text-violet-300 cursor-pointer select-none" onclick="event.stopPropagation()">View persona perspectives</summary>
           <div class="mt-1 space-y-1">
             <%= for {name, take} <- @takes do %>
               <div class="bg-gray-900 rounded p-1.5">
@@ -269,7 +269,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
             <% end %>
           </div>
         </details>
-      <% end %>
+        <% end %>
       <%= if @memory.publish_hash do %>
         <div class="text-[10px] text-emerald-400">
           🌐 Node: <span class="font-mono"><%= String.slice(@memory.publish_hash, 0, 16) %></span>
