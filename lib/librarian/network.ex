@@ -214,6 +214,40 @@ defmodule Librarian.Network do
   end
 
   @doc """
+  Get a single public node by its SHA-256 hash ID.
+  Returns `nil` if not found.
+  """
+  @spec get_node(String.t()) :: map() | nil
+  def get_node(node_hash) when is_binary(node_hash) do
+    result =
+      Ecto.Adapters.SQL.query!(
+        Librarian.PublicRepo,
+        """
+        SELECT id, summary, importance, bucket, metadata, publisher_hash, inserted_at
+        FROM public_nodes
+        WHERE id = $1
+        """,
+        [node_hash]
+      )
+
+    case result do
+      %{rows: [[id, summary, importance, bucket, metadata_json, publisher_hash, inserted_at]]} ->
+        %{
+          id: id,
+          summary: summary,
+          importance: importance,
+          bucket: bucket,
+          metadata: decode_json(metadata_json, %{}),
+          publisher_hash: publisher_hash,
+          inserted_at: inserted_at
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
   Get all nodes and edges for the graph visualization.
 
   Returns `%{nodes: [...], edges: [...]}`.

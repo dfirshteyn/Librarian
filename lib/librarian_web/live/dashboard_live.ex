@@ -8,6 +8,7 @@ defmodule LibrarianWeb.DashboardLive do
   import LibrarianWeb.Dashboard.Components.StructuredRecallTerminal
   import LibrarianWeb.Dashboard.Components.DrawerControls
   import LibrarianWeb.Dashboard.Components.AncestryModal
+  import LibrarianWeb.Dashboard.Components.NodeDetailModal
   alias Librarian.{WarmStore, HotStore, Flusher}
   require Logger
 
@@ -71,8 +72,9 @@ defmodule LibrarianWeb.DashboardLive do
        :private_count,
        length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
      )
-     |> assign(:public_count, 0)
-     |> assign(:insights_drawer_count, 0)}
+      |> assign(:public_count, 0)
+      |> assign(:insights_drawer_count, 0)
+      |> assign(:selected_node, nil)}
   end
 
   @impl true
@@ -653,6 +655,44 @@ defmodule LibrarianWeb.DashboardLive do
   def handle_event("close_ancestry", _params, socket),
     do: {:noreply, assign(socket, ancestry_memory_id: nil, ancestry_tree: [])}
 
+  def handle_event("select_private_node", %{"id" => id}, socket) do
+    mid = String.to_integer(id)
+    memory = Librarian.WarmStore.get(mid)
+
+    node =
+      if memory do
+        %{
+          type: :private,
+          id: memory.id,
+          summary: memory.summary || "",
+          importance: memory.importance || 0.5,
+          bucket: memory.bucket |> String.split(":") |> List.last(),
+          tags: memory.tags || [],
+          facts: memory.facts || [],
+          council: memory.council,
+          raw_original: memory.raw_original
+        }
+      end
+
+    {:noreply, assign(socket, :selected_node, node)}
+  end
+
+  def handle_event("select_public_node", %{"id" => id}, socket) do
+    node =
+      case Librarian.Network.get_node(id) do
+        nil ->
+          nil
+
+        public_node ->
+          Map.put(public_node, :type, :public)
+      end
+
+    {:noreply, assign(socket, :selected_node, node)}
+  end
+
+  def handle_event("close_node_detail", _params, socket),
+    do: {:noreply, assign(socket, :selected_node, nil)}
+
   def handle_event("seed_demo", _params, socket) do
     if socket.assigns.demo_running do
       {:noreply, socket}
@@ -848,6 +888,7 @@ defmodule LibrarianWeb.DashboardLive do
       </div>
       <%= if @ancestry_memory_id do %><.ancestry_modal memory_id={@ancestry_memory_id} tenant_id={@tenant_id} ancestry={@ancestry_tree} /><% end %>
       <%= if @publish_confirm_id do %><.publish_confirm_modal memory_id={@publish_confirm_id} synthesis={@publish_confirm_synthesis} /><% end %>
+      <%= if @selected_node do %><.node_detail_modal node={@selected_node} /><% end %>
     </div>
     """
   end
