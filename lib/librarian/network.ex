@@ -278,7 +278,7 @@ defmodule Librarian.Network do
         LIMIT 500
         """
 
-        params = node_ids ++ node_ids
+        params = node_ids
 
         edges_result =
           Ecto.Adapters.SQL.query!(Librarian.PublicRepo, query, params)

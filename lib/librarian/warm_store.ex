@@ -392,7 +392,7 @@ defmodule Librarian.WarmStore do
               last_accessed_at: accessed,
               superseded_by: map["superseded_by"],
               correlation_id: map["correlation_id"],
-              council: map["council"],
+              council: normalize_council(map["council"]),
               publish_hash: map["publish_hash"],
               published: map["published"] || false,
               locked: map["locked"] || false,
@@ -428,6 +428,30 @@ defmodule Librarian.WarmStore do
       _ -> DateTime.utc_now()
     end
   end
+
+  @doc """
+  Normalize the council map after JSON deserialization.
+
+  JSON round-trips atom keys to string keys.  All downstream code accesses
+  council fields with atom keys (`:synthesis`, `:bucket`, `:persona_takes`,
+  `:failures`), so we convert them back here on load.
+
+  Returns the original value unchanged if it's not a map (nil, empty, etc.).
+  """
+  def normalize_council(nil), do: nil
+
+  def normalize_council(council) when is_map(council) do
+    known_keys = [:synthesis, :bucket, :persona_takes, :failures]
+
+    Enum.reduce(known_keys, council, fn key, acc ->
+      case Map.get(acc, to_string(key)) do
+        nil -> acc
+        val -> acc |> Map.delete(to_string(key)) |> Map.put(key, val)
+      end
+    end)
+  end
+
+  def normalize_council(other), do: other
 
   # ── GenServer ────────────────────────────────────────────────────────
 
