@@ -118,22 +118,137 @@ defmodule Librarian.Demo do
 
   @doc """
   Seeds a user's sandbox with a specified number of diverse memories
-  from the demo set. Ingests them to the HOT tier.
+  from the demo set. Ingests them to the HOT tier and notifies FlushQueue.
   """
   def seed_sandbox(user_id, count \\ 10) when is_binary(user_id) and is_integer(count) do
-    # Select count diverse or random items
     items = Enum.take_random(@demo_texts, count)
 
     Enum.each(items, fn text ->
-      Librarian.ingest(
-        %{
-          "source" => "seed_demo",
-          "raw_text" => text,
-          "hint_tags" => [],
-          "metadata" => %{"demo" => "seed"}
-        },
-        user_id
-      )
+      case Librarian.IngestRouter.process(
+             %{
+               "source" => "seed_demo",
+               "raw_text" => text,
+               "hint_tags" => [],
+               "metadata" => %{"demo" => "seed"}
+             },
+             user_id
+           ) do
+        {:ok, _} -> :ok
+        {:ok, _, _} -> :ok
+        {:error, _} -> :ok
+      end
     end)
+  end
+
+  @doc """
+  Seeds the sandbox with context-rich memories that classify into separate buckets,
+  then triggers an immediate flush so the curator assigns them to project/research/ideas/etc.
+
+  This is the main demo function for the dashboard — it shows:
+    1. Ingest into HOT (inbox buffer)
+    2. Curator classifies each payload into semantic buckets at flush time
+    3. WARM tier fills with properly bucketed memories
+  """
+  def seed_demo_with_context(user_id, count \\ 30) when is_binary(user_id) and is_integer(count) do
+    items =
+      @demo_texts
+      |> Enum.take(count)
+
+    Enum.each(items, fn text ->
+      case Librarian.IngestRouter.process(
+             %{
+               "source" => "seed_demo_context",
+               "raw_text" => text,
+               "hint_tags" => [],
+               "metadata" => %{"demo" => "context_seed"}
+             },
+             user_id
+           ) do
+        {:ok, _} -> :ok
+        {:ok, _, _} -> :ok
+        {:error, _} -> :ok
+      end
+    end)
+
+    # Give the inbox a moment to settle, then flush
+    :timer.sleep(500)
+
+    Librarian.Flusher.flush_all(user_id, 1,
+      progress_callback: &Librarian.FlushProgressAgent.report_progress/4
+    )
+
+    # Consolidation sweep to show cross-bucket connections
+    Task.start(fn ->
+      :timer.sleep(1000)
+      Librarian.Consolidator.consolidate(user_id)
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Seeds specific buckets with targeted demo memories for a bucket-by-bucket demo.
+  This bypasses the inbox buffer by routing directly through the curator's
+  deterministic classifier, then flushing each bucket individually so you can
+  watch them fill one at a time.
+
+  Returns a map of bucket_name => count_seeded.
+  """
+  def seed_buckets_demo(user_id) when is_binary(user_id) do
+    # A curated mini-corpus targeting the known buckets
+    targeted = %{
+      "project" => [
+        "deployed the new Phoenix LiveView endpoint to production after load testing",
+        "switched the primary database from Postgres to SQLite for the edge nodes",
+        "fixed the N+1 query in the user dashboard that was causing 5s page loads",
+        "refactored the GenServer pool to use a DynamicSupervisor for better fault isolation",
+        "implemented a CircuitBreaker for the payment gateway API calls",
+      ],
+      "research" => [
+        "the BGE-M3 embedding model achieves 0.92 recall on the retrieval benchmark",
+        "fine-tuned the 1.5B Qwen model on domain-specific code documentation",
+        "the cosine similarity search over 50k embeddings completes in 12ms with hnswlib",
+        "implemented the RAG pipeline with hybrid search: BM25 keyword + dense vector retrieval",
+      ],
+      "ideas" => [
+        "the Q2 roadmap prioritizes the memory graph visualization feature for the hackathon demo",
+        "the customer interview feedback: they want to run this on a Raspberry Pi for field agents",
+        "the hackathon pitch highlights three pillars: concurrency, isolation, and local-first",
+      ],
+      "thoughts" => [
+        "the weather today was perfect for a long walk",
+        "watched a documentary about octopus cognition, genuinely fascinating",
+        "tried the new ramen place downtown, the tonkotsu broth was outstanding",
+      ]
+    }
+
+    results =
+      Enum.reduce(targeted, %{}, fn {bucket, texts}, acc ->
+        Enum.each(texts, fn text ->
+          case Librarian.IngestRouter.process(
+                 %{
+                   "source" => "seed_buckets_demo",
+                   "raw_text" => text,
+                   "hint_tags" => [bucket],
+                   "metadata" => %{"demo" => "bucket_demo", "target_bucket" => bucket}
+                 },
+                 user_id
+               ) do
+            {:ok, _} -> :ok
+            {:ok, _, _} -> :ok
+            {:error, _} -> :ok
+          end
+        end)
+
+        # Flush this specific bucket only
+        full_bucket = "#{user_id}:inbox"
+        Librarian.Flusher.flush_bucket(full_bucket,
+          progress_callback: &Librarian.FlushProgressAgent.report_progress/4
+        )
+
+        Map.put(acc, bucket, length(texts))
+      end)
+
+    results
   end
 end

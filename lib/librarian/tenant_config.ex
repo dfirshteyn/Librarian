@@ -34,6 +34,7 @@ defmodule Librarian.TenantConfig do
       _ ->
         default_for(key)
     end
+
   end
 
   @doc """

@@ -11,7 +11,7 @@ defmodule LibrarianWeb.Dashboard.Components.Header do
     ~H"""
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-3">
-        <h1 class="text-xl font-bold text-white">📚 Librarian Ledger</h1>
+        <h1 class="text-xl font-bold text-white">📚 Librarian Beam Memory Layer</h1>
         <code class="text-xs bg-gray-800 px-2 py-0.5 rounded text-indigo-300 font-mono"><%= @tenant_id %></code>
         <button data-tenant-id={@tenant_id}
           onclick="var tid=this.getAttribute('data-tenant-id');navigator.clipboard.writeText(tid);this.textContent='Copied!';setTimeout(()=>this.textContent='📋 Copy',1500)"

@@ -777,11 +777,11 @@ defmodule LibrarianWeb.DashboardLive do
       {:noreply, socket}
     else
       Task.start(fn ->
-        Librarian.Demo.seed_sandbox(socket.assigns.tenant_id, 10)
+        Librarian.Demo.seed_demo_with_context(socket.assigns.tenant_id, 30)
         Phoenix.LiveView.send_update(__MODULE__, id: "dashboard", demo_running: false)
       end)
 
-      {:noreply, socket |> assign(:demo_running, true) |> assign(:demo_total, 10)}
+      {:noreply, socket |> assign(:demo_running, true) |> assign(:demo_total, 30)}
     end
   end
 
