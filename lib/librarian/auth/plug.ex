@@ -86,6 +86,7 @@ defmodule Librarian.Auth.Plug do
         conn
         |> put_session(:sandbox_id, sandbox_id)
         |> put_session(:tier, tier)
+        |> put_session(:sandbox_token, signed_token)
       else
         conn
       end

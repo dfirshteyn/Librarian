@@ -40,7 +40,8 @@ defmodule LibrarianWeb.Router do
 
   scope "/", LibrarianWeb do
     pipe_through(:browser)
-    live("/", DashboardLive, :index)
+    live("/", WelcomeLive, :index)
+    live("/dashboard", DashboardLive, :index)
   end
 
   scope "/api", LibrarianWeb do
