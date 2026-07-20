@@ -20,16 +20,16 @@ defmodule LibrarianWeb.Dashboard.Components.DrawerControls do
         💻 Terminal
       </button>
 
-      <button phx-click="toggle_graph"
+      <button phx-click="set_graph_mode" phx-value-mode="private"
         id="graph-btn"
         class={"text-xs px-3 py-1.5 rounded font-bold transition border flex items-center gap-1.5 " <>
-          if(@show_graph,
+          if(@show_graph and @graph_mode == "private",
             do: "bg-cyan-900/60 border-cyan-700 text-cyan-300",
             else: "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400")}>
         🕸️ Graph: Private (<%= @private_count %>)
       </button>
 
-      <button phx-click="toggle_graph"
+      <button phx-click="set_graph_mode" phx-value-mode="public"
         id="public-graph-btn"
         class={"text-xs px-3 py-1.5 rounded font-bold transition border flex items-center gap-1.5 " <>
           if(@show_graph and @graph_mode == "public",

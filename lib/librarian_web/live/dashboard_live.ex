@@ -28,47 +28,47 @@ defmodule LibrarianWeb.DashboardLive do
       Phoenix.PubSub.subscribe(Librarian.PubSub, "delegation:#{tenant_id}")
     end
 
-    {:ok,
-     socket
-     |> assign(:hot_payloads, HotStore.feed_entries_for_user(tenant_id))
-     |> assign(:feed_empty, false)
-     |> assign(:tenant_id, tenant_id)
-     |> assign(:tier, tier)
-     |> assign(:force_local, false)
-     |> assign_memories(tenant_id)
-     |> assign(:hot_counts, hot_counts(tenant_id))
-     |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tenant_id))
-     |> assign(
-       :auto_consolidation_enabled,
-       Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
-     )
-     |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tenant_id))
-     |> assign(:query, "")
-     |> assign(:recall_results, nil)
-     |> assign(:insights, Librarian.morning_briefing(20))
-     |> assign(:ingest_text, "")
-     |> assign(:ingest_bucket, "inbox")
-     |> assign(:expanded_memories, MapSet.new())
-     |> assign(:demo_running, false)
-     |> assign(:demo_total, 0)
-     |> assign(:ancestry_memory_id, nil)
-     |> assign(:ancestry_tree, [])
-     |> assign(:structured_response, nil)
-     |> assign(:council_pending, MapSet.new())
-     |> assign(:publish_pending, MapSet.new())
-     |> assign(:delegation_progress, %{})
-     |> assign(:flush_progress, %{})
-     |> assign(:new_memories, %{})
-     |> assign(:publish_confirm_id, nil)
-     |> assign(:publish_confirm_synthesis, nil)
-     |> assign(:active_bucket, "all")
-     |> assign(:show_terminal, false)
-     |> assign(:show_graph, false)
-     |> assign(:show_insights, false)
-     |> assign(:graph_mode, "public")
-     |> assign(:private_count, 0)
-     |> assign(:public_count, 0)
-     |> assign(:insights_drawer_count, 0)}
+     {:ok,
+      socket
+      |> assign(:hot_payloads, HotStore.feed_entries_for_user(tenant_id))
+      |> assign(:feed_empty, false)
+      |> assign(:tenant_id, tenant_id)
+      |> assign(:tier, tier)
+      |> assign(:force_local, false)
+      |> assign_memories(tenant_id)
+      |> assign(:hot_counts, hot_counts(tenant_id))
+      |> assign(:auto_flush_enabled, Librarian.FlushQueue.enabled?(tenant_id))
+      |> assign(
+        :auto_consolidation_enabled,
+        Librarian.Consolidation.AutomationServer.enabled?(tenant_id)
+      )
+      |> assign(:nightly_pass_enabled, Librarian.TenantConfig.nightly_pass_enabled?(tenant_id))
+      |> assign(:query, "")
+      |> assign(:recall_results, nil)
+      |> assign(:insights, Librarian.morning_briefing(20))
+      |> assign(:ingest_text, "")
+      |> assign(:ingest_bucket, "inbox")
+      |> assign(:expanded_memories, MapSet.new())
+      |> assign(:demo_running, false)
+      |> assign(:demo_total, 0)
+      |> assign(:ancestry_memory_id, nil)
+      |> assign(:ancestry_tree, [])
+      |> assign(:structured_response, nil)
+      |> assign(:council_pending, MapSet.new())
+      |> assign(:publish_pending, MapSet.new())
+      |> assign(:delegation_progress, %{})
+      |> assign(:flush_progress, %{})
+      |> assign(:new_memories, %{})
+      |> assign(:publish_confirm_id, nil)
+      |> assign(:publish_confirm_synthesis, nil)
+      |> assign(:active_bucket, "all")
+      |> assign(:show_terminal, false)
+      |> assign(:show_graph, false)
+      |> assign(:show_insights, false)
+      |> assign(:graph_mode, "public")
+      |> assign(:private_count, length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by)))
+      |> assign(:public_count, 0)
+      |> assign(:insights_drawer_count, 0)}
   end
 
   @impl true
@@ -83,13 +83,14 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_info({:flushed, _bucket, _user_id}, socket) do
     tid = socket.assigns.tenant_id
+    updated_socket = assign_memories(socket, tid)
 
     {:noreply,
-     socket
-     |> assign_memories(tid)
+     updated_socket
      |> assign(:hot_counts, hot_counts(tid))
      |> assign(:flush_progress, %{})
-     |> assign(:new_memories, %{})}
+     |> assign(:new_memories, %{})
+     |> assign(:private_count, length(updated_socket.assigns.memories))}
   end
 
   def handle_info({:flush_progress, user_id, bucket, processed, total, memory}, socket) do
@@ -118,8 +119,18 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   def handle_info(:refresh_graph, socket) do
-    # Fix: use the correct component ID "graph_overlay" to match the template
-    send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
+    # Update the appropriate graph component based on mode
+    cond do
+      socket.assigns.show_graph and socket.assigns.graph_mode == "public" ->
+        send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
+
+      socket.assigns.show_graph and socket.assigns.graph_mode == "private" ->
+        send_update(LibrarianWeb.Dashboard.Components.PrivateGraph, id: "private_graph")
+
+      true ->
+        :ok
+    end
+
     {:noreply, socket}
   end
 
@@ -174,21 +185,66 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_event("toggle_graph", _params, socket) do
     socket = assign(socket, :show_graph, not socket.assigns.show_graph)
-    # When opening the graph drawer in public mode, trigger the component to load data
-    if socket.assigns.show_graph and socket.assigns.graph_mode == "public" do
-      send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
-      # Also update public_count when opening the graph (lazy)
-      {:noreply, update_public_count(socket)}
-    else
-      {:noreply, socket}
+    # When opening the graph drawer, trigger the appropriate component to load data
+    cond do
+      socket.assigns.show_graph and socket.assigns.graph_mode == "public" ->
+        send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
+        {:noreply, update_public_count(socket)}
+
+      socket.assigns.show_graph and socket.assigns.graph_mode == "private" ->
+        send_update(LibrarianWeb.Dashboard.Components.PrivateGraph, id: "private_graph")
+        # Update private count immediately since we have the memories
+        {:noreply, socket |> assign(:private_count, length(socket.assigns.memories))}
+
+      true ->
+        {:noreply, socket}
     end
+  end
+
+  # Update private graph when mode changes to private (and ensure drawer opens)
+  def handle_event("set_graph_mode", %{"mode" => "private"}, socket) do
+    socket = assign(socket, :graph_mode, "private")
+
+    # Open the drawer if not already open and trigger graph load
+    socket =
+      cond do
+        socket.assigns.show_graph ->
+          # Drawer already open, just trigger update and set private count
+          :ok = send_update(LibrarianWeb.Dashboard.Components.PrivateGraph,
+            id: "private_graph",
+            tenant_id: socket.assigns.tenant_id
+          )
+          socket
+          |> assign(:private_count, length(socket.assigns.memories))
+
+        true ->
+          # Drawer closed, open it
+          assign(socket, :show_graph, true)
+      end
+
+    {:noreply, socket}
+  end
+
+  # Update public graph when mode changes to public (and ensure drawer opens)
+  def handle_event("set_graph_mode", %{"mode" => "public"}, socket) do
+    socket = assign(socket, :graph_mode, "public")
+
+    # Open the drawer if not already open and trigger graph load
+    socket =
+      if socket.assigns.show_graph do
+        :ok = send_update(LibrarianWeb.Dashboard.Components.PublicGraph, id: "graph_overlay")
+        socket
+      else
+        assign(socket, :show_graph, true)
+      end
+
+    {:noreply, update_public_count(socket)}
   end
 
   def handle_event("toggle_insights", _params, socket),
     do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
 
-  def handle_event("set_graph_mode", %{"mode" => mode}, socket),
-    do: {:noreply, assign(socket, :graph_mode, mode)}
+  # Removed generic set_graph_mode - now handled by specific private/public versions above
 
   @impl true
   def handle_event("structured_recall", %{"command" => cmd}, socket) do
@@ -726,9 +782,7 @@ defmodule LibrarianWeb.DashboardLive do
             <%= if @graph_mode == "public" do %>
               <.live_component module={LibrarianWeb.Dashboard.Components.PublicGraph} id="graph_overlay" />
             <% else %>
-              <div class="bg-gray-950 rounded border border-gray-800 p-6 h-full flex items-center justify-center">
-                <div class="text-center"><p class="text-gray-400 text-sm mb-2">🔒 Private Graph</p><p class="text-gray-600 text-xs">Shows your local SQLite lineage and chunk relationships.</p><p class="text-gray-600 text-xs mt-1">Ingest memories and delegate to Council to populate.</p></div>
-              </div>
+              <.live_component module={LibrarianWeb.Dashboard.Components.PrivateGraph} id="private_graph" tenant_id={@tenant_id} />
             <% end %>
           </div>
         </div>
