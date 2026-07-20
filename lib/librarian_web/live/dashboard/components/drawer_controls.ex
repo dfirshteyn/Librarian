@@ -4,9 +4,13 @@ defmodule LibrarianWeb.Dashboard.Components.DrawerControls do
   attr(:show_terminal, :boolean, default: false)
   attr(:show_graph, :boolean, default: false)
   attr(:show_insights, :boolean, default: false)
+  attr(:show_consolidation_history, :boolean, default: false)
+  attr(:show_cold_store, :boolean, default: false)
   attr(:private_count, :integer, default: 0)
   attr(:public_count, :integer, default: 0)
   attr(:insights_count, :integer, default: 0)
+  attr(:consolidation_history_count, :integer, default: 0)
+  attr(:cold_store_count, :integer, default: 0)
   attr(:graph_mode, :string, default: "public")
 
   def drawer_controls(assigns) do
@@ -44,6 +48,22 @@ defmodule LibrarianWeb.Dashboard.Components.DrawerControls do
             do: "bg-amber-900/60 border-amber-700 text-amber-300",
             else: "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400")}>
         ✨ Insights (<%= @insights_count %>)
+      </button>
+
+      <button phx-click="toggle_consolidation_history"
+        class={"text-xs px-3 py-1.5 rounded font-bold transition border flex items-center gap-1.5 " <>
+          if(@show_consolidation_history,
+            do: "bg-blue-900/60 border-blue-700 text-blue-300",
+            else: "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400")}>
+        🔄 Consolidation
+      </button>
+
+      <button phx-click="toggle_cold_store"
+        class={"text-xs px-3 py-1.5 rounded font-bold transition border flex items-center gap-1.5 " <>
+          if(@show_cold_store,
+            do: "bg-indigo-900/60 border-indigo-700 text-indigo-300",
+            else: "bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-400")}>
+        🧊 Cold Store
       </button>
 
       <div class="ml-auto text-sm font-bold text-gray-600">

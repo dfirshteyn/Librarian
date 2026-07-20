@@ -49,6 +49,7 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:query, "")
      |> assign(:recall_results, nil)
      |> assign(:insights, Librarian.morning_briefing(20))
+     |> assign(:consolidation_events, load_consolidation_history())
      |> assign(:ingest_text, "")
      |> assign(:ingest_bucket, "inbox")
      |> assign(:expanded_memories, MapSet.new())
@@ -65,17 +66,19 @@ defmodule LibrarianWeb.DashboardLive do
      |> assign(:publish_confirm_id, nil)
      |> assign(:publish_confirm_synthesis, nil)
      |> assign(:active_bucket, "all")
-     |> assign(:show_terminal, false)
-     |> assign(:show_graph, false)
-     |> assign(:show_insights, false)
-     |> assign(:graph_mode, "public")
-     |> assign(
-       :private_count,
-       length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
-     )
-      |> assign(:public_count, 0)
-      |> assign(:insights_drawer_count, 0)
-      |> assign(:selected_node, nil)}
+      |> assign(:show_terminal, false)
+      |> assign(:show_graph, false)
+      |> assign(:show_insights, false)
+      |> assign(:show_consolidation_history, false)
+      |> assign(:show_cold_store, false)
+      |> assign(:graph_mode, "public")
+      |> assign(
+        :private_count,
+        length(WarmStore.all_for_user(tenant_id) |> Enum.reject(& &1.superseded_by))
+      )
+       |> assign(:public_count, 0)
+       |> assign(:insights_drawer_count, 0)
+       |> assign(:selected_node, nil)}
   end
 
   @impl true
@@ -128,33 +131,43 @@ defmodule LibrarianWeb.DashboardLive do
   end
 
   def handle_info({:spawned, count}, socket) do
-    {:noreply, put_flash(socket, :info, "🔄 Consolidation started: #{count} memories")}
+    event = %{"kind" => "consolidation_started", "memory_count" => count}
+    {:noreply, add_consolidation_event(socket, event)}
   end
 
   def handle_info({:merged, from_id, into_id, sim, _preview_a, _preview_b}, socket) do
-    {:noreply,
-     put_flash(socket, :info, "🔗 Merged ##{from_id} → ##{into_id} (sim: #{Float.round(sim, 2)})")}
+    event = %{
+      "kind" => "consolidation_merged",
+      "from_id" => from_id,
+      "into_id" => into_id,
+      "similarity" => Float.round(sim, 2)
+    }
+    {:noreply, add_consolidation_event(socket, event)}
   end
 
   def handle_info({:complete, survivors, merged_count}, socket) do
-    msg =
-      if merged_count > 0 do
-        "✅ Consolidation complete: #{survivors} survivors, #{merged_count} merged"
-      else
-        "✅ Consolidation complete: #{survivors} survivors, no merges needed"
-      end
-
+    event = %{
+      "kind" => "consolidation_complete",
+      "survivor_count" => survivors,
+      "merged_count" => merged_count
+    }
     {:noreply,
      socket
-     |> put_flash(:info, msg)
+     |> add_consolidation_event(event)
      |> assign_memories(socket.assigns.tenant_id)}
   end
 
   def handle_info({:complete, survivors}, socket) do
+    event = %{"kind" => "consolidation_complete", "survivor_count" => survivors}
     {:noreply,
      socket
-     |> put_flash(:info, "✅ Consolidation complete: #{survivors} survivors")
+     |> add_consolidation_event(event)
      |> assign_memories(socket.assigns.tenant_id)}
+  end
+
+  def handle_info({:consolidation_skipped, reason, count}, socket) do
+    event = %{"kind" => "consolidation_skipped", "reason" => reason, "count" => count}
+    {:noreply, add_consolidation_event(socket, event)}
   end
 
   def handle_info(:refresh_graph, socket) do
@@ -216,6 +229,11 @@ defmodule LibrarianWeb.DashboardLive do
     else
       socket
     end
+  end
+
+  defp add_consolidation_event(socket, event) do
+    events = [event | socket.assigns.consolidation_events] |> Enum.take(50)
+    assign(socket, :consolidation_events, events)
   end
 
   @impl true
@@ -284,6 +302,12 @@ defmodule LibrarianWeb.DashboardLive do
 
   def handle_event("toggle_insights", _params, socket),
     do: {:noreply, assign(socket, :show_insights, not socket.assigns.show_insights)}
+
+  def handle_event("toggle_consolidation_history", _params, socket),
+    do: {:noreply, assign(socket, :show_consolidation_history, not socket.assigns.show_consolidation_history)}
+
+  def handle_event("toggle_cold_store", _params, socket),
+    do: {:noreply, assign(socket, :show_cold_store, not socket.assigns.show_cold_store)}
 
   # Removed generic set_graph_mode - now handled by specific private/public versions above
 
@@ -868,7 +892,7 @@ defmodule LibrarianWeb.DashboardLive do
         <.ingest_feed tenant_id={@tenant_id} ingest_text={@ingest_text} ingest_bucket={@ingest_bucket} feed_empty={@feed_empty} hot_payloads={@hot_payloads} hot_counts={@hot_counts} auto_flush_enabled={@auto_flush_enabled} flush_progress={@flush_progress} />
         <.warm_cards tenant_id={@tenant_id} memories={@filtered_memories} active_bucket={@active_bucket} expanded_memories={@expanded_memories} council_pending={@council_pending} publish_pending={@publish_pending} delegation_progress={@delegation_progress} flush_progress={@flush_progress} new_memories={@new_memories} auto_consolidation_enabled={@auto_consolidation_enabled} />
       </div>
-      <.drawer_controls show_terminal={@show_terminal} show_graph={@show_graph} show_insights={@show_insights} private_count={@private_count} public_count={@public_count} insights_count={@insights_drawer_count} graph_mode={@graph_mode} />
+      <.drawer_controls show_terminal={@show_terminal} show_graph={@show_graph} show_insights={@show_insights} show_consolidation_history={@show_consolidation_history} show_cold_store={@show_cold_store} private_count={@private_count} public_count={@public_count} insights_count={@insights_drawer_count} consolidation_history_count={length(@consolidation_events)} cold_store_count={@cold_count} graph_mode={@graph_mode} />
       <.structured_recall_terminal tenant_id={@tenant_id} structured_response={@structured_response} show={@show_terminal} />
       <div class={"fixed inset-0 z-40 flex items-end justify-center pointer-events-none " <> if(@show_graph, do: "", else: "hidden")}>
         <div class="absolute inset-0 bg-black/50 pointer-events-auto" phx-click="toggle_graph"></div>
@@ -903,7 +927,7 @@ defmodule LibrarianWeb.DashboardLive do
             <%= if @insights == [] do %>
               <p class="text-gray-600 text-xs">No insights yet. Run the Nightly Pass to discover connections.</p>
             <% else %>
-              <%= for insight <- @insights do %>
+              <%= for insight <- @insights, not String.starts_with?(insight["kind"], "consolidation_") do %>
                 <div class="bg-gray-800 rounded p-3 border border-gray-700">
                   <div class="flex items-center gap-2 mb-1">
                     <span class="text-xs"><%= insight_icon(insight["kind"]) %></span>
@@ -913,6 +937,59 @@ defmodule LibrarianWeb.DashboardLive do
                   <p class="text-xs text-gray-300"><%= insight_summary(insight) %></p>
                 </div>
               <% end %>
+            <% end %>
+          </div>
+        </div>
+      </div>
+      <div class={"fixed inset-0 z-40 flex items-end justify-center pointer-events-none " <> if(@show_consolidation_history, do: "", else: "hidden")}>
+        <div class="absolute inset-0 bg-black/50 pointer-events-auto" phx-click="toggle_consolidation_history"></div>
+        <div class={"relative w-full max-w-3xl bg-gray-900 border border-blue-800 rounded-t-xl shadow-2xl pointer-events-auto transition-transform duration-300 max-h-[60vh] overflow-y-auto " <> if(@show_consolidation_history, do: "translate-y-0", else: "translate-y-full")}>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-blue-900 sticky top-0 bg-gray-900">
+            <h2 class="text-sm font-bold text-blue-300 uppercase tracking-wider">🔄 Consolidation History</h2>
+            <button phx-click="toggle_consolidation_history" class="text-gray-500 hover:text-gray-300 transition text-lg leading-none">✕</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <%= if @consolidation_events == [] do %>
+              <p class="text-gray-600 text-xs">No consolidation events yet.</p>
+            <% else %>
+              <%= for event <- @consolidation_events do %>
+                <div class="bg-gray-800 rounded p-3 border border-gray-700">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs"><%= consolidation_event_icon(event["kind"]) %></span>
+                    <span class="text-xs text-gray-400"><%= event["kind"] %></span>
+                  </div>
+                  <p class="text-xs text-gray-300"><%= consolidation_event_summary(event) %></p>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+      </div>
+      <div class={"fixed inset-0 z-40 flex items-end justify-center pointer-events-none " <> if(@show_cold_store, do: "", else: "hidden")}>
+        <div class="absolute inset-0 bg-black/50 pointer-events-auto" phx-click="toggle_cold_store"></div>
+        <div class={"relative w-full max-w-4xl bg-gray-900 border border-indigo-800 rounded-t-xl shadow-2xl pointer-events-auto transition-transform duration-300 max-h-[60vh] overflow-y-auto " <> if(@show_cold_store, do: "translate-y-0", else: "translate-y-full")}>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-indigo-900 sticky top-0 bg-gray-900">
+            <h2 class="text-sm font-bold text-indigo-300 uppercase tracking-wider">🧊 Cold Store - Archived Memories</h2>
+            <button phx-click="toggle_cold_store" class="text-gray-500 hover:text-gray-300 transition text-lg leading-none">✕</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <%= if @cold_count == 0 do %>
+              <p class="text-gray-600 text-xs">No archived memories yet. Memories are moved to Cold Store during consolidation.</p>
+            <% else %>
+              <div class="space-y-2">
+                <%= for memory <- Librarian.ColdStore.list_for_user(@tenant_id, 100) do %>
+                  <div class="bg-gray-800 rounded p-3 border border-gray-700">
+                    <div class="flex items-start justify-between gap-3 mb-2">
+                      <p class="text-xs text-gray-300 flex-1"><%= memory.summary %></p>
+                      <span class="text-[10px] px-2 py-0.5 rounded font-bold bg-indigo-900/60 border border-indigo-700 text-indigo-300 flex-shrink-0"><%= memory.bucket %></span>
+                    </div>
+                    <div class="flex items-center gap-3 text-[10px] text-gray-500">
+                      <span>⭐ Importance: <%= Float.round(memory.importance || 0, 2) %></span>
+                      <span>📅 Archived: <%= memory.created_at %></span>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
             <% end %>
           </div>
         </div>
@@ -959,4 +1036,30 @@ defmodule LibrarianWeb.DashboardLive do
     do: "Consolidation skipped: #{m["reason"]} (#{m["count"]})"
 
   defp insight_summary(m), do: inspect(m)
+
+  defp consolidation_event_icon("consolidation_started"), do: "🔄"
+  defp consolidation_event_icon("consolidation_complete"), do: "✅"
+  defp consolidation_event_icon("consolidation_skipped"), do: "⏭️"
+  defp consolidation_event_icon("consolidation_merged"), do: "🔗"
+  defp consolidation_event_icon(_), do: "📋"
+
+  defp consolidation_event_summary(%{"kind" => "consolidation_started"} = m),
+    do: "Consolidation started: #{m["memory_count"]} memories"
+
+  defp consolidation_event_summary(%{"kind" => "consolidation_complete"} = m) do
+    "Consolidation complete: #{m["survivor_count"]} survivors#{if(m["merged_count"] > 0, do: ", #{m["merged_count"]} merged", else: "")}"
+  end
+
+  defp consolidation_event_summary(%{"kind" => "consolidation_skipped"} = m),
+    do: "Skipped: #{m["reason"]} (#{m["count"]} memories)"
+
+  defp consolidation_event_summary(%{"kind" => "consolidation_merged"} = m),
+    do: "Merged ##{m["from_id"]} → ##{m["into_id"]} (sim: #{m["similarity"]})"
+
+  defp consolidation_event_summary(m), do: inspect(m)
+
+  defp load_consolidation_history do
+    Librarian.ColdStore.read_insights(100)
+    |> Enum.filter(fn insight -> String.starts_with?(insight["kind"], "consolidation_") end)
+  end
 end

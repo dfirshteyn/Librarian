@@ -6,6 +6,13 @@ defmodule LibrarianWeb.Dashboard.Components.InsightsPanel do
   attr(:insights, :list, required: true)
 
   def insights_panel(assigns) do
+    assigns =
+      assign(assigns, :deep_pass_insights,
+        Enum.reject(assigns.insights, fn insight ->
+          String.starts_with?(insight["kind"], "consolidation_")
+        end)
+      )
+
     ~H"""
     <div class="bg-gray-900 rounded-lg p-4 overflow-hidden">
       <h2 class="text-sm font-bold text-gray-300 mb-3 uppercase tracking-wider">
@@ -19,14 +26,14 @@ defmodule LibrarianWeb.Dashboard.Components.InsightsPanel do
       </h2>
       <div class="overflow-x-auto whitespace-nowrap pb-2 -mb-2">
         <div class="flex gap-3 inline-flex">
-          <%= if @insights == [] do %>
+          <%= if @deep_pass_insights == [] do %>
             <div class="flex-shrink-0 w-80 bg-gray-800 rounded p-3 border border-gray-700">
               <p class="text-xs text-gray-400">
-                No insights yet. Run the Nightly Pass to discover cross-bucket connections, contradictions, and patterns.
+                No deep pass insights yet. Run the Nightly Pass to discover cross-bucket connections, contradictions, and patterns.
               </p>
             </div>
           <% else %>
-            <%= for insight <- @insights do %>
+            <%= for insight <- @deep_pass_insights do %>
               <div class="flex-shrink-0 w-72 bg-gray-800 rounded p-3 border border-gray-700">
                 <div class="flex items-center gap-2 mb-1">
                   <span class="text-xs"><%= insight_icon(insight["kind"]) %></span>

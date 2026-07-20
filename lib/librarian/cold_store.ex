@@ -550,6 +550,32 @@ defmodule Librarian.ColdStore do
     end
   end
 
+  @doc """
+  List all memories for a user from the COLD store.
+  Returns up to `limit` memories, most recent first.
+  """
+  def list_for_user(user_id, limit \\ 100) when is_binary(user_id) and is_integer(limit) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    case Exqlite.query(
+           conn,
+           """
+           SELECT id, bucket, summary, facts, tags, importance,
+                  created_at, last_accessed_at, superseded_by, original_content
+           FROM memories
+           ORDER BY created_at DESC
+           LIMIT ?1
+           """,
+           [limit]
+         ) do
+      {:ok, %{rows: rows}} ->
+        Enum.map(rows, &row_to_memory/1)
+
+      _ ->
+        []
+    end
+  end
+
   # ── FTS5 search ────────────────────────────────────────────────────
 
   @doc """
