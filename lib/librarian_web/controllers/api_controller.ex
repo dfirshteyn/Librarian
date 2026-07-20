@@ -696,6 +696,53 @@ defmodule LibrarianWeb.ApiController do
     end
   end
 
+  @doc """
+  DELETE /api/memory/:id
+  Optional header: X-User-Id (defaults to "local")
+
+  Deletes a memory from the user's WARM and COLD stores.
+  Published memories cannot be deleted.
+  Returns 422 if memory is published or not found.
+  """
+  def delete_memory(conn, %{"id" => id}) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      case Integer.parse(to_string(id)) do
+        {memory_id, ""} ->
+          case Librarian.forget_memory(memory_id, user_id) do
+            {:ok, _} ->
+              json(conn, %{ok: true, deleted_id: memory_id})
+
+            {:error, :not_found} ->
+              conn
+              |> put_status(404)
+              |> json(%{ok: false, error: "memory not found"})
+
+            {:error, :cannot_delete_published} ->
+              conn
+              |> put_status(422)
+              |> json(%{ok: false, error: "published memories cannot be deleted"})
+          end
+
+        _ ->
+          conn
+          |> put_status(422)
+          |> json(%{ok: false, error: "invalid id param (expected integer)"})
+      end
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
+  end
+
+  def delete_memory(conn, _params) do
+    user_id = get_user_id(conn)
+    conn |> put_status(422) |> json(%{ok: false, error: "missing id param", user_id: user_id})
+  end
+
   # Multipart file handling
 
   defp has_multipart?(conn) do

@@ -428,6 +428,31 @@ defmodule LibrarianWeb.DashboardLive do
     end
   end
 
+  def handle_event("delete_memory", %{"id" => id}, socket) do
+    mid = String.to_integer(id)
+
+    case Librarian.WarmStore.get(mid) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Memory not found")}
+
+      %{published: true} ->
+        {:noreply, put_flash(socket, :error, "Published memories cannot be deleted")}
+
+      _ ->
+        case Librarian.forget_memory(mid, socket.assigns.tenant_id) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign_memories(socket.assigns.tenant_id)
+             |> assign(:private_count, length(socket.assigns.memories) - 1)
+             |> put_flash(:info, "Memory deleted")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Delete failed: #{inspect(reason)}")}
+        end
+    end
+  end
+
   def handle_event("delegate_council", %{"id" => id}, socket) do
     mid = String.to_integer(id)
 

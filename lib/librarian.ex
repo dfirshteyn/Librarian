@@ -86,6 +86,39 @@ defmodule Librarian do
   def command(query, user_id), do: recall(query, user_id)
   def command(str), do: command(str, @default_user)
 
+  @doc """
+  Delete a memory by ID. Removes from WARM tier if present, then from COLD tier.
+  Returns `{:ok, memory_id}` or `{:error, reason}`.
+  Published memories cannot be deleted.
+  """
+  def forget_memory(id, user_id \\ @default_user)
+
+  def forget_memory(id, user_id) when is_integer(id) do
+    # First check if it's in WARM
+    case WarmStore.get(id) do
+      nil ->
+        # Not in WARM - try to delete from COLD
+        case Librarian.ColdStore.delete(user_id, id) do
+          :ok -> {:ok, id}
+          {:error, _} -> {:error, :not_found}
+        end
+
+      memory ->
+        # In WARM - check if published
+        if memory.published do
+          {:error, :cannot_delete_published}
+        else
+          # Delete from WARM
+          WarmStore.forget(id)
+
+          # Also try to delete from COLD if it exists there
+          Librarian.ColdStore.delete(user_id, id)
+
+          {:ok, id}
+        end
+    end
+  end
+
   defp do_forget(query, user_id) do
     WarmStore.recall(query, user_id)
     |> Enum.map(fn m ->

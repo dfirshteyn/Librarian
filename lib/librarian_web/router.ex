@@ -55,6 +55,7 @@ defmodule LibrarianWeb.Router do
     get("/status", ApiController, :status)
     get("/export", ApiController, :export)
     get("/health/curator", ApiController, :curator_health)
+    delete("/memory/:id", ApiController, :delete_memory)
 
     # Bucket CRUD
     get("/buckets", ApiController, :list_buckets)

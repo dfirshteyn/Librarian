@@ -135,7 +135,7 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       <% end %>
 
       <%= if @expanded? do %>
-        <.memory_detail memory={@memory} />
+        <.memory_detail memory={@memory} submitted?={@submitted?} published?={@published?} />
         <%!-- Re-bucket dropdown: only for unlocked, unpublished memories --%>
         <%= if not @submitted? and not @published? and not @locked? do %>
           <div class="mt-2 pt-2 border-t border-gray-700/50" phx-click="ignore" phx-no-propagate>
@@ -282,13 +282,15 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
   # ── Memory Detail (expanded card) ───────────────────────────────────
 
   attr(:memory, :map, required: true)
+  attr(:submitted?, :boolean, default: false)
+  attr(:published?, :boolean, default: false)
 
   def memory_detail(assigns) do
     ~H"""
      <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
        <%= if @memory.raw_original do %>
          <div class="text-[10px] text-gray-600">
-           📄 Raw original available in ancestry view
+           📄 Original text available in ancestry view
          </div>
        <% end %>
        <div>
@@ -318,13 +320,20 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
       <%= if @memory.superseded_by do %>
         <div class="text-xs text-yellow-400">🔁 Superseded by #<%= @memory.superseded_by %></div>
       <% end %>
-      <button phx-click="open_ancestry" phx-value-id={@memory.id}
-        class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition">
-        🌳 View Ancestry
-      </button>
-    </div>
-    """
-  end
+       <button phx-click="open_ancestry" phx-value-id={@memory.id}
+         class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition">
+         🌳 View Ancestry
+       </button>
+       <%= if not @submitted? and not @published? do %>
+         <button phx-click="delete_memory" phx-value-id={@memory.id}
+           class="text-xs bg-red-700 hover:bg-red-600 text-white px-2 py-1 rounded transition ml-2"
+           data-confirm="Delete this memory? This cannot be undone.">
+           🗑️ Delete
+         </button>
+       <% end %>
+     </div>
+     """
+   end
 
   # ── Lineage Detail (audit trail) ───────────────────────────────────────
 

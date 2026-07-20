@@ -488,6 +488,56 @@ defmodule Librarian.ColdStore do
   end
 
   @doc """
+  Get a single memory by ID from the COLD store.
+  Returns nil if not found, or a memory map.
+  """
+  @spec get_memory(String.t(), integer()) :: map() | nil
+  def get_memory(user_id, memory_id) when is_binary(user_id) and is_integer(memory_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    case Exqlite.query(
+           conn,
+           "SELECT id, bucket, summary, facts, tags, importance, created_at, last_accessed_at, superseded_by, original_content FROM memories WHERE id = ?1",
+           [memory_id]
+         ) do
+      {:ok, %{rows: [row]}} ->
+        [id, bucket, summary, facts_json, tags_json, importance, created_at, last_accessed_at, superseded_by, original_content] = row
+
+        %{
+          id: id,
+          bucket: bucket,
+          summary: summary,
+          facts: decode_json_list(facts_json),
+          tags: decode_json_list(tags_json),
+          importance: importance,
+          created_at: created_at,
+          last_accessed_at: last_accessed_at,
+          superseded_by: superseded_by,
+          original_content: original_content
+        }
+
+      {:ok, %{rows: []}} ->
+        nil
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  @doc """
+  Delete a memory from the COLD store. Returns :ok or {:error, reason}.
+  """
+  @spec delete(String.t(), integer()) :: :ok | {:error, term()}
+  def delete(user_id, memory_id) when is_binary(user_id) and is_integer(memory_id) do
+    conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    case Exqlite.query(conn, "DELETE FROM memories WHERE id = ?1", [memory_id]) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
   Count the total number of memories stored in the SQLite COLD store for a user.
   """
   @spec count(String.t()) :: integer()
