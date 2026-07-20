@@ -101,7 +101,7 @@ defmodule LibrarianWeb.DashboardLive do
 
     {:noreply,
      updated_socket
-     |> assign(:hot_counts, hot_counts(tid))
+     |> assign(:hot_payloads, HotStore.feed_entries_for_user(tid))
      |> assign(:flush_progress, %{})
      |> assign(:new_memories, %{})
      |> assign(:private_count, length(updated_socket.assigns.memories))
