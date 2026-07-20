@@ -55,6 +55,7 @@ defmodule Librarian.LeakGuard do
   HOT ETS copy intentionally stays unscrubbed for performance.
   """
   def scrub(nil), do: {nil, 0}
+
   def scrub(text) when is_binary(text) do
     Enum.reduce(@patterns, {text, 0}, fn {type, pattern}, {acc_text, count} ->
       label = "[REDACTED_#{type |> Atom.to_string() |> String.upcase()}]"
@@ -72,6 +73,7 @@ defmodule Librarian.LeakGuard do
 
   @doc "True if the text contains any pattern we'd redact."
   def contains_secret?(nil), do: false
+
   def contains_secret?(text) do
     Enum.any?(@patterns, fn {_type, pattern} -> Regex.match?(pattern, text) end)
   end

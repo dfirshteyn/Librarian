@@ -32,13 +32,13 @@ if config_env() == :prod do
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 
-   # Postgres public graph — optional for contributing to shared knowledge base
-   # Leave unset for isolated deployment without public graph integration
-   if public_database_url = System.get_env("DATABASE_PUBLIC_URL") do
-     config :librarian, Librarian.PublicRepo,
-       url: public_database_url,
-       pool_size: String.to_integer(System.get_env("PUBLIC_POOL_SIZE") || "5")
-   end
+  # Postgres public graph — optional for contributing to shared knowledge base
+  # Leave unset for isolated deployment without public graph integration
+  if public_database_url = System.get_env("DATABASE_PUBLIC_URL") do
+    config :librarian, Librarian.PublicRepo,
+      url: public_database_url,
+      pool_size: String.to_integer(System.get_env("PUBLIC_POOL_SIZE") || "5")
+  end
 
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||

@@ -41,6 +41,7 @@ defmodule LibrarianWeb.Dashboard.Components.PrivateGraph do
   @impl true
   def handle_event("refresh_graph", _params, socket) do
     tid = socket.assigns[:tenant_id]
+
     if tid do
       {:noreply, assign_graph(socket, tid)}
     else
@@ -50,6 +51,7 @@ defmodule LibrarianWeb.Dashboard.Components.PrivateGraph do
 
   def handle_info(:refresh_graph, socket) do
     tid = socket.assigns[:tenant_id]
+
     if tid do
       {:noreply, assign_graph(socket, tid)}
     else
@@ -59,6 +61,7 @@ defmodule LibrarianWeb.Dashboard.Components.PrivateGraph do
 
   defp assign_graph(socket, tenant_id) do
     graph = build_private_graph(tenant_id)
+
     socket
     |> assign(:graph, graph)
     |> assign(:tenant_id, tenant_id)

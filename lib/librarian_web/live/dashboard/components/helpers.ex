@@ -41,7 +41,8 @@ defmodule LibrarianWeb.Dashboard.Components.Helpers do
     do: "Consolidation started: #{m["memory_count"]} memories in flight"
 
   def insight_summary(%{"kind" => "consolidation_complete"} = m),
-    do: "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
+    do:
+      "Consolidation complete: #{m["survivor_count"]} survivors, #{m["merged_clusters"]} merged (from #{m["initial_count"]} initial)"
 
   def insight_summary(%{"kind" => "consolidation_skipped"} = m),
     do: "Consolidation skipped: #{m["reason"]} (#{m["count"]})"

@@ -10,16 +10,24 @@
     </style>
   </head>
   <body>
-    <strong>Librarian Capture</strong>
-    <p style="font-size:12px;color:#777;margin:6px 0;">
-      Sends the page (or your selection) to the local librarian daemon.
-      No processing happens here — that's the point.
-    </p>
-    <button id="captureSelection">Capture selected text</button>
-    <button id="capturePage">Capture whole page text</button>
-    <textarea id="manual" placeholder="...or paste/type something to capture manually"></textarea>
-    <button id="captureManual">Capture manual text</button>
-    <div id="status">idle</div>
-    <script src="popup.js"></script>
+   <strong>Librarian Capture</strong>
+   <p style="font-size:12px;color:#777;margin:6px 0;">
+     Sends the page (or your selection) to the local librarian daemon.
+     No processing happens here — that's the point.
+   </p>
+   <select id="bucket" style="width:100%;margin-top:6px;font-size:12px;">
+     <option value="inbox">inbox (default)</option>
+     <option value="project">project</option>
+     <option value="research">research</option>
+     <option value="ideas">ideas</option>
+     <option value="thoughts">thoughts</option>
+     <option value="finance">finance</option>
+   </select>
+   <button id="captureSelection">Capture selected text</button>
+   <button id="capturePage">Capture whole page text</button>
+   <textarea id="manual" placeholder="...or paste/type something to capture manually"></textarea>
+   <button id="captureManual">Capture manual text</button>
+   <div id="status">idle</div>
+   <script src="popup.js"></script>
   </body>
 </html>

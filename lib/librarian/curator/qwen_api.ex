@@ -78,12 +78,14 @@ defmodule Librarian.Curator.QwenApi do
   end
 
   @impl true
-  @spec summarize(maybe_improper_list(), keyword()) :: {:error, any()} | {:ok, Librarian.Curator.Result.t()}
+  @spec summarize(maybe_improper_list(), keyword()) ::
+          {:error, any()} | {:ok, Librarian.Curator.Result.t()}
   def summarize(chunk, opts \\ []) when is_list(chunk) do
     text = chunk |> Enum.map(& &1.raw_text) |> Enum.join("\n---\n")
     {prompt, _} = Librarian.LeakGuard.scrub(build_prompt(text))
 
-    with {:ok, body} <- chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
+    with {:ok, body} <-
+           chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
          {:ok, result} <- parse_result(body) do
       {:ok, result}
     end
@@ -120,7 +122,8 @@ defmodule Librarian.Curator.QwenApi do
 
     {prompt, _} = Librarian.LeakGuard.scrub(build_deep_pass_prompt(text))
 
-    with {:ok, body} <- chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
+    with {:ok, body} <-
+           chat(prompt, Keyword.put_new(opts, :response_format, %{"type" => "json_object"})),
          {:ok, actions} <- parse_deep_pass(body) do
       {:ok, actions}
     end

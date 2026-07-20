@@ -42,14 +42,14 @@ defmodule Librarian.IngestRouter do
       case should_chunk?(routed_payload) do
         false ->
           # Single payload - notify FlushQueue after ingest
-           case Librarian.ingest(routed_payload, user_id) do
-             {:ok, bucket} ->
-               Librarian.FlushQueue.payload_added(user_id, bucket)
-               {:ok, bucket}
+          case Librarian.ingest(routed_payload, user_id) do
+            {:ok, bucket} ->
+              Librarian.FlushQueue.payload_added(user_id, bucket)
+              {:ok, bucket}
 
-             {:ok, bucket, :duplicate} ->
-               {:ok, bucket}
-           end
+            {:ok, bucket, :duplicate} ->
+              {:ok, bucket}
+          end
 
         {:chunk, correlation_id} ->
           ingest_chunks(routed_payload, correlation_id, user_id)
@@ -105,6 +105,7 @@ defmodule Librarian.IngestRouter do
       original_filename: params["original_filename"],
       parent_id: params["parent_id"],
       chunk_index: params["chunk_index"],
+      target_bucket: params["target_bucket"] || params["bucket"],
       stored_path: params["stored_path"],
       dimensions: params["dimensions"],
       raw_extraction: params["raw_extraction"],

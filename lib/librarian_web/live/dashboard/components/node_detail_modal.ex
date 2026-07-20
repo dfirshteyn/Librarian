@@ -1,7 +1,7 @@
 defmodule LibrarianWeb.Dashboard.Components.NodeDetailModal do
   use Phoenix.Component
 
-  attr :node, :map, required: true
+  attr(:node, :map, required: true)
 
   def node_detail_modal(assigns) do
     ~H"""

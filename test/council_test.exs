@@ -82,23 +82,28 @@ defmodule Librarian.CouncilTest do
 
       # Create a memory that will serve as the "consolidated" target
       {:ok, emb} = Curator.Stub.embed("consolidated memory for provenance test")
-      memory = WarmStore.put("prov_user:test", %Curator.Result{
-        summary: "consolidated memory",
-        facts: ["was merged from two sources"],
-        tags: ["test"],
-        importance: 0.5,
-        embedding: emb
-      })
+
+      memory =
+        WarmStore.put("prov_user:test", %Curator.Result{
+          summary: "consolidated memory",
+          facts: ["was merged from two sources"],
+          tags: ["test"],
+          importance: 0.5,
+          embedding: emb
+        })
 
       # Create a "document fragment" memory and log a chunk_of edge to it
       {:ok, frag_emb} = Curator.Stub.embed("document fragment for provenance test")
-      fragment = WarmStore.put("prov_user:test", %Curator.Result{
-        summary: "original document fragment",
-        facts: ["part of a larger document"],
-        tags: ["test"],
-        importance: 0.5,
-        embedding: frag_emb
-      })
+
+      fragment =
+        WarmStore.put("prov_user:test", %Curator.Result{
+          summary: "original document fragment",
+          facts: ["part of a larger document"],
+          tags: ["test"],
+          importance: 0.5,
+          embedding: frag_emb
+        })
+
       ColdStore.log_relationship(
         to_string(fragment.id),
         to_string(memory.id),
@@ -109,13 +114,16 @@ defmodule Librarian.CouncilTest do
 
       # Create a "prior observation" memory and log a superseded_by edge to it
       {:ok, prior_emb} = Curator.Stub.embed("prior observation for provenance test")
-      prior = WarmStore.put("prov_user:test", %Curator.Result{
-        summary: "prior observation that was merged",
-        facts: ["was an independent memory"],
-        tags: ["test"],
-        importance: 0.5,
-        embedding: prior_emb
-      })
+
+      prior =
+        WarmStore.put("prov_user:test", %Curator.Result{
+          summary: "prior observation that was merged",
+          facts: ["was an independent memory"],
+          tags: ["test"],
+          importance: 0.5,
+          embedding: prior_emb
+        })
+
       ColdStore.log_relationship(
         to_string(prior.id),
         to_string(memory.id),

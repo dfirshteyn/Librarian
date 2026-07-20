@@ -28,7 +28,10 @@ defmodule Librarian.FlushProgressAgent do
   def init_progress(user_id, bucket, total) do
     Agent.update(__MODULE__, fn state ->
       user_state = Map.get(state, user_id, %{})
-      updated_user_state = Map.put(user_state, bucket, %{processed: 0, total: total, memories: []})
+
+      updated_user_state =
+        Map.put(user_state, bucket, %{processed: 0, total: total, memories: []})
+
       Map.put(state, user_id, updated_user_state)
     end)
   end

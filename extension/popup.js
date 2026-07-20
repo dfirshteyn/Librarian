@@ -1,47 +1,52 @@
-const WS_URL = "ws://localhost:4001";
+ const WS_URL = "ws://localhost:4001";
 
-function setStatus(text) {
-  document.getElementById("status").textContent = text;
-}
+ function setStatus(text) {
+   document.getElementById("status").textContent = text;
+ }
 
-function send(rawText, sourceHint, tabUrl) {
-  if (!rawText || !rawText.trim()) {
-    setStatus("nothing to capture");
-    return;
-  }
+ function getSelectedBucket() {
+   return document.getElementById("bucket").value || "inbox";
+ }
 
-  setStatus("connecting to librarian...");
-  const ws = new WebSocket(WS_URL);
+ function send(rawText, sourceHint, tabUrl) {
+   if (!rawText || !rawText.trim()) {
+     setStatus("nothing to capture");
+     return;
+   }
 
-  ws.onopen = () => {
-    const payload = {
-      source: "chrome_ext",
-      raw_text: rawText.trim().slice(0, 20000), // keep payloads sane
-      hint_tags: [sourceHint],
-      metadata: { tab_url: tabUrl || "" }
-    };
-    setStatus("sending " + payload.raw_text.length + " chars...");
-    ws.send(JSON.stringify(payload));
-  };
+   setStatus("connecting to librarian...");
+   const ws = new WebSocket(WS_URL);
 
-  ws.onmessage = (event) => {
-    try {
-      const resp = JSON.parse(event.data);
-      if (resp.ok) {
-        setStatus("captured -> bucket: " + resp.bucket);
-      } else {
-        setStatus("error: " + resp.error);
-      }
-    } catch (e) {
-      setStatus("got unparseable response");
-    }
-    ws.close();
-  };
+   ws.onopen = () => {
+     const payload = {
+       source: "chrome_ext",
+       raw_text: rawText.trim().slice(0, 20000), // keep payloads sane
+       hint_tags: [sourceHint],
+       target_bucket: getSelectedBucket(),
+       metadata: { tab_url: tabUrl || "" }
+     };
+     setStatus("sending " + payload.raw_text.length + " chars...");
+     ws.send(JSON.stringify(payload));
+   };
 
-  ws.onerror = () => {
-    setStatus("could not reach librarian daemon on " + WS_URL + " — is it running?");
-  };
-}
+   ws.onmessage = (event) => {
+     try {
+       const resp = JSON.parse(event.data);
+       if (resp.ok) {
+         setStatus("captured -> bucket: " + resp.bucket);
+       } else {
+         setStatus("error: " + resp.error);
+       }
+     } catch (e) {
+       setStatus("got unparseable response");
+     }
+     ws.close();
+   };
+
+   ws.onerror = () => {
+     setStatus("could not reach librarian daemon on " + WS_URL + " — is it running?");
+   };
+ }
 
 async function getActiveTabInfo(selectionOnly) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

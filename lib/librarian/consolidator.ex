@@ -117,6 +117,7 @@ defmodule Librarian.Consolidator do
       survivors = Enum.map(final_clusters, fn {mem, _ids} -> mem end)
 
       merged_count = length(Enum.filter(final_clusters, fn {_mem, ids} -> length(ids) > 1 end))
+
       total_originals =
         final_clusters
         |> Enum.flat_map(fn {_mem, ids} -> ids end)
@@ -155,7 +156,6 @@ defmodule Librarian.Consolidator do
         :ets.insert(table_ref, {m.id, {m, [m.id]}})
       end
     end)
-
 
     # For each memory still in the table, scan for mergeable neighbors
     Enum.each(memories, fn m ->

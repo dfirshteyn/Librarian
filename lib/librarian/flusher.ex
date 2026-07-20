@@ -167,8 +167,13 @@ defmodule Librarian.Flusher do
           {:ok, vec} ->
             result = %{result | embedding: vec}
 
+            # Use pre-assigned target_bucket if present, otherwise use curator's bucket
             normalized =
-              Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+              if payload.target_bucket do
+                Librarian.Router.normalize_bucket(payload.target_bucket, user_id)
+              else
+                Librarian.Router.normalize_bucket(result.bucket || "inbox", user_id)
+              end
 
             warm_bucket = "#{user_id}:#{normalized}"
 
@@ -393,7 +398,8 @@ defmodule Librarian.Flusher do
     # Apply new tags
     Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
       case Librarian.WarmStore.get(id) do
-        nil -> :ok
+        nil ->
+          :ok
 
         memory ->
           updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}

@@ -91,6 +91,12 @@ defmodule Librarian.McpServer do
               "description" => "Optional hint tags for classification",
               "default" => []
             },
+            "bucket" => %{
+              "type" => "string",
+              "description" =>
+                "Optional target bucket name (e.g., 'project', 'research', 'ideas'). If omitted, uses model classification at flush time.",
+              "default" => "inbox"
+            },
             "user_id" => %{
               "type" => "string",
               "description" => "User/agent identifier for multi-tenant isolation",
@@ -267,9 +273,15 @@ defmodule Librarian.McpServer do
     source = args["source"] || "mcp"
     tags = args["tags"] || []
     user_id = args["user_id"] || "local"
+    target_bucket = args["bucket"]
 
     case Librarian.IngestRouter.process(
-           %{"source" => source, "raw_text" => text, "hint_tags" => tags},
+           %{
+             "source" => source,
+             "raw_text" => text,
+             "hint_tags" => tags,
+             "target_bucket" => target_bucket
+           },
            user_id
          ) do
       {:ok, bucket} ->

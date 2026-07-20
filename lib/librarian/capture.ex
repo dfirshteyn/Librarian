@@ -22,6 +22,8 @@ defmodule Librarian.Capture.Payload do
     original_filename: nil,
     parent_id: nil,
     chunk_index: nil,
+    # Optional target bucket (bypasses model classification at flush time)
+    target_bucket: nil,
     # File/media support
     stored_path: nil,
     dimensions: nil,
@@ -60,6 +62,7 @@ defmodule Librarian.Capture.Payload do
       original_filename: map["original_filename"],
       parent_id: map["parent_id"],
       chunk_index: map["chunk_index"],
+      target_bucket: map["target_bucket"] || map["bucket"],
       stored_path: map["stored_path"],
       dimensions: map["dimensions"],
       raw_extraction: map["raw_extraction"],

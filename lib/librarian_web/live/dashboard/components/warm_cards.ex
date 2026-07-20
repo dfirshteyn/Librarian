@@ -287,53 +287,53 @@ defmodule LibrarianWeb.Dashboard.Components.WarmCards do
 
   def memory_detail(assigns) do
     ~H"""
-     <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
-       <%= if @memory.raw_original do %>
-         <div class="text-[10px] text-gray-600">
-           📄 Original text available in ancestry view
-         </div>
-       <% end %>
-       <div>
-         <span class="text-xs text-gray-400">Facts:</span>
-         <%= if @memory.facts && @memory.facts != [] do %>
-           <ul class="text-xs text-gray-300 mt-1 space-y-1 list-disc list-inside">
-             <%= for fact <- @memory.facts do %>
-               <li><%= fact %></li>
-             <% end %>
-           </ul>
-         <% else %>
-           <p class="text-xs text-gray-600 mt-1">No facts extracted</p>
-         <% end %>
-       </div>
-      <div class="flex gap-3 text-xs">
-        <span class="text-gray-400">Created: <%= DateTime.to_iso8601(@memory.created_at) %></span>
-        <%= if @memory.embedding do %>
-          <span class="text-blue-400">🔢 Embedding: <%= length(@memory.embedding) %>-dim</span>
-        <% end %>
-      </div>
-      <div class="text-xs">
-        <span class="text-gray-400">Tags: </span>
-        <%= for tag <- (@memory.tags || []) do %>
-          <span class="text-xs bg-gray-700 text-gray-300 rounded px-1.5 py-0.5"><%= tag %></span>
-        <% end %>
-      </div>
-      <%= if @memory.superseded_by do %>
-        <div class="text-xs text-yellow-400">🔁 Superseded by #<%= @memory.superseded_by %></div>
+    <div class="mt-2 pt-2 border-t border-gray-700 space-y-2">
+      <%= if @memory.raw_original do %>
+        <div class="text-[10px] text-gray-600">
+          📄 Original text available in ancestry view
+        </div>
       <% end %>
-       <button phx-click="open_ancestry" phx-value-id={@memory.id}
-         class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition">
-         🌳 View Ancestry
-       </button>
-       <%= if not @submitted? and not @published? do %>
-         <button phx-click="delete_memory" phx-value-id={@memory.id}
-           class="text-xs bg-red-700 hover:bg-red-600 text-white px-2 py-1 rounded transition ml-2"
-           data-confirm="Delete this memory? This cannot be undone.">
-           🗑️ Delete
-         </button>
+      <div>
+        <span class="text-xs text-gray-400">Facts:</span>
+        <%= if @memory.facts && @memory.facts != [] do %>
+          <ul class="text-xs text-gray-300 mt-1 space-y-1 list-disc list-inside">
+            <%= for fact <- @memory.facts do %>
+              <li><%= fact %></li>
+            <% end %>
+          </ul>
+        <% else %>
+          <p class="text-xs text-gray-600 mt-1">No facts extracted</p>
+        <% end %>
+      </div>
+     <div class="flex gap-3 text-xs">
+       <span class="text-gray-400">Created: <%= DateTime.to_iso8601(@memory.created_at) %></span>
+       <%= if @memory.embedding do %>
+         <span class="text-blue-400">🔢 Embedding: <%= length(@memory.embedding) %>-dim</span>
        <% end %>
      </div>
-     """
-   end
+     <div class="text-xs">
+       <span class="text-gray-400">Tags: </span>
+       <%= for tag <- (@memory.tags || []) do %>
+         <span class="text-xs bg-gray-700 text-gray-300 rounded px-1.5 py-0.5"><%= tag %></span>
+       <% end %>
+     </div>
+     <%= if @memory.superseded_by do %>
+       <div class="text-xs text-yellow-400">🔁 Superseded by #<%= @memory.superseded_by %></div>
+     <% end %>
+      <button phx-click="open_ancestry" phx-value-id={@memory.id}
+        class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition">
+        🌳 View Ancestry
+      </button>
+      <%= if not @submitted? and not @published? do %>
+        <button phx-click="delete_memory" phx-value-id={@memory.id}
+          class="text-xs bg-red-700 hover:bg-red-600 text-white px-2 py-1 rounded transition ml-2"
+          data-confirm="Delete this memory? This cannot be undone.">
+          🗑️ Delete
+        </button>
+      <% end %>
+    </div>
+    """
+  end
 
   # ── Lineage Detail (audit trail) ───────────────────────────────────────
 

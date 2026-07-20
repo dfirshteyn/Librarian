@@ -160,9 +160,16 @@ defmodule Librarian.WsServer do
   defp handle_message(text, client) do
     case Librarian.Json.decode(text) do
       {:ok, map} ->
-        case Librarian.IngestRouter.process(map, "local") do
+        # Accept optional "bucket" parameter (maps to target_bucket)
+        # Also accept "user_id" for multi-tenant support via WebSocket
+        user_id = map["user_id"] || "local"
+
+        case Librarian.IngestRouter.process(map, user_id) do
           {:ok, bucket} ->
-            send_text(client, Librarian.Json.encode(%{"ok" => true, "bucket" => bucket}))
+            send_text(
+              client,
+              Librarian.Json.encode(%{"ok" => true, "bucket" => bucket, "user_id" => user_id})
+            )
 
           {:ok, bucket, chunk_count} ->
             send_text(
@@ -170,13 +177,21 @@ defmodule Librarian.WsServer do
               Librarian.Json.encode(%{
                 "ok" => true,
                 "bucket" => bucket,
+                "user_id" => user_id,
                 "chunk_count" => chunk_count,
                 "note" => "Document auto-chunked into #{chunk_count} pieces"
               })
             )
 
           {:error, reason} ->
-            send_text(client, Librarian.Json.encode(%{"ok" => false, "error" => inspect(reason)}))
+            send_text(
+              client,
+              Librarian.Json.encode(%{
+                "ok" => false,
+                "error" => inspect(reason),
+                "user_id" => user_id
+              })
+            )
         end
 
       {:error, reason} ->

@@ -23,12 +23,13 @@ config :librarian, consolidation_curator: Librarian.Curator.Stub
 
 # Override ModelRouting to use Stub in test — no network, no API keys needed.
 # The defaults route to QwenApi which requires DASHSCOPE_API_KEY.
-config :librarian, model_routing: %{
-  council_persona: {Librarian.Curator.Stub, "stub"},
-  council_judge: {Librarian.Curator.Stub, "stub"},
-  consolidation: {Librarian.Curator.Stub, "stub"},
-  deep_pass: {Librarian.Curator.Stub, "stub"}
-}
+config :librarian,
+  model_routing: %{
+    council_persona: {Librarian.Curator.Stub, "stub"},
+    council_judge: {Librarian.Curator.Stub, "stub"},
+    consolidation: {Librarian.Curator.Stub, "stub"},
+    deep_pass: {Librarian.Curator.Stub, "stub"}
+  }
 
 # Free tier curator in test: Stub (no network). Judges still resolve to QwenApi
 # but no test exercises that path with real network calls.

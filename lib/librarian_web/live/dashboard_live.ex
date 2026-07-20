@@ -97,7 +97,9 @@ defmodule LibrarianWeb.DashboardLive do
     updated_socket = assign_memories(socket, tid)
 
     fresh_insights = Librarian.morning_briefing(20)
-    insights_count = Enum.reject(fresh_insights, &String.starts_with?(&1["kind"], "consolidation_")) |> length()
+
+    insights_count =
+      Enum.reject(fresh_insights, &String.starts_with?(&1["kind"], "consolidation_")) |> length()
 
     {:noreply,
      updated_socket

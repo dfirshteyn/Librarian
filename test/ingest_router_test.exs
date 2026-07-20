@@ -197,7 +197,9 @@ defmodule Librarian.IngestRouterTest do
     test "processes large text files uploaded as binary data via ingest_params" do
       # Simulate ingest_file parameters: file_data has the base64-encoded text
       # original_filename: "large_text.txt", file_type: "text/plain", no raw_text.
-      large_text = String.duplicate("This is a sentence that will repeat to cross the threshold. ", 100)
+      large_text =
+        String.duplicate("This is a sentence that will repeat to cross the threshold. ", 100)
+
       b64_data = Base.encode64(large_text)
 
       params = %{

@@ -80,7 +80,11 @@ defmodule Librarian.ColdStore do
 
       {:error, reason} ->
         require Logger
-        Logger.error("[ColdStore] Failed to log relationship #{relationship_type} from #{source_id} to #{target_id}: #{inspect(reason)}")
+
+        Logger.error(
+          "[ColdStore] Failed to log relationship #{relationship_type} from #{source_id} to #{target_id}: #{inspect(reason)}"
+        )
+
         {:error, reason}
     end
   end
@@ -412,19 +416,30 @@ defmodule Librarian.ColdStore do
 
   @doc """
   Get all active bucket names for a user. Used by Router.normalize_bucket/2.
+
+  Returns default bucket names as fallback if database is unavailable or not yet
+  initialized for anonymous users.
   """
   def valid_bucket_names(user_id) when is_binary(user_id) do
     conn = Librarian.ColdStore.ConnectionManager.get_conn(user_id)
+
+    # Seed default buckets if this is a new database
     seed_default_buckets(conn)
 
-    {:ok, result} =
-      Exqlite.query(
-        conn,
-        "SELECT name FROM buckets WHERE deleted_at IS NULL",
-        []
-      )
+    # Try to query, but fall back to defaults on error (for anonymous users with fresh DBs)
+    case Exqlite.query(conn, "SELECT name FROM buckets WHERE deleted_at IS NULL", []) do
+      {:ok, %{rows: rows}} ->
+        rows |> Enum.map(fn [name] -> name end)
 
-    result.rows |> Enum.map(fn [name] -> name end)
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "[ColdStore] Failed to get bucket names for #{user_id}, using defaults: #{inspect(reason)}"
+        )
+
+        @default_buckets
+    end
   end
 
   defp seed_default_buckets(conn) do
@@ -501,7 +516,18 @@ defmodule Librarian.ColdStore do
            [memory_id]
          ) do
       {:ok, %{rows: [row]}} ->
-        [id, bucket, summary, facts_json, tags_json, importance, created_at, last_accessed_at, superseded_by, original_content] = row
+        [
+          id,
+          bucket,
+          summary,
+          facts_json,
+          tags_json,
+          importance,
+          created_at,
+          last_accessed_at,
+          superseded_by,
+          original_content
+        ] = row
 
         %{
           id: id,

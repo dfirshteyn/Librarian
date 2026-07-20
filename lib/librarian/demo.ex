@@ -149,7 +149,8 @@ defmodule Librarian.Demo do
     2. Curator classifies each payload into semantic buckets at flush time
     3. WARM tier fills with properly bucketed memories
   """
-  def seed_demo_with_context(user_id, count \\ 30) when is_binary(user_id) and is_integer(count) do
+  def seed_demo_with_context(user_id, count \\ 30)
+      when is_binary(user_id) and is_integer(count) do
     items =
       @demo_texts
       |> Enum.take(count)
@@ -202,23 +203,23 @@ defmodule Librarian.Demo do
         "switched the primary database from Postgres to SQLite for the edge nodes",
         "fixed the N+1 query in the user dashboard that was causing 5s page loads",
         "refactored the GenServer pool to use a DynamicSupervisor for better fault isolation",
-        "implemented a CircuitBreaker for the payment gateway API calls",
+        "implemented a CircuitBreaker for the payment gateway API calls"
       ],
       "research" => [
         "the BGE-M3 embedding model achieves 0.92 recall on the retrieval benchmark",
         "fine-tuned the 1.5B Qwen model on domain-specific code documentation",
         "the cosine similarity search over 50k embeddings completes in 12ms with hnswlib",
-        "implemented the RAG pipeline with hybrid search: BM25 keyword + dense vector retrieval",
+        "implemented the RAG pipeline with hybrid search: BM25 keyword + dense vector retrieval"
       ],
       "ideas" => [
         "the Q2 roadmap prioritizes the memory graph visualization feature for the hackathon demo",
         "the customer interview feedback: they want to run this on a Raspberry Pi for field agents",
-        "the hackathon pitch highlights three pillars: concurrency, isolation, and local-first",
+        "the hackathon pitch highlights three pillars: concurrency, isolation, and local-first"
       ],
       "thoughts" => [
         "the weather today was perfect for a long walk",
         "watched a documentary about octopus cognition, genuinely fascinating",
-        "tried the new ramen place downtown, the tonkotsu broth was outstanding",
+        "tried the new ramen place downtown, the tonkotsu broth was outstanding"
       ]
     }
 
@@ -242,6 +243,7 @@ defmodule Librarian.Demo do
 
         # Flush this specific bucket only
         full_bucket = "#{user_id}:inbox"
+
         Librarian.Flusher.flush_bucket(full_bucket,
           progress_callback: &Librarian.FlushProgressAgent.report_progress/4
         )

@@ -88,17 +88,24 @@ defmodule Librarian.Utils.FileDetector do
 
   defp detect_from_mime(mime) when is_binary(mime) do
     cond do
-      String.starts_with?(mime, "image/") -> :image
-      mime == "application/pdf" -> :pdf
+      String.starts_with?(mime, "image/") ->
+        :image
+
+      mime == "application/pdf" ->
+        :pdf
+
       String.starts_with?(mime, "text/") or
-        mime in [
-          "application/json",
-          "application/javascript",
-          "application/typescript",
-          "application/yaml",
-          "application/toml"
-        ] -> :text
-      true -> :binary
+          mime in [
+            "application/json",
+            "application/javascript",
+            "application/typescript",
+            "application/yaml",
+            "application/toml"
+          ] ->
+        :text
+
+      true ->
+        :binary
     end
   end
 

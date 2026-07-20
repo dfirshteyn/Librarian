@@ -7,7 +7,9 @@ defmodule LibrarianWeb.Dashboard.Components.InsightsPanel do
 
   def insights_panel(assigns) do
     assigns =
-      assign(assigns, :deep_pass_insights,
+      assign(
+        assigns,
+        :deep_pass_insights,
         Enum.reject(assigns.insights, fn insight ->
           String.starts_with?(insight["kind"], "consolidation_")
         end)

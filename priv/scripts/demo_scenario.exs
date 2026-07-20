@@ -260,28 +260,40 @@ defmodule DemoScenario do
     IO.puts("")
   end
 
-  defp send_payloads(user_id, profile, payloads) do
-    results =
-      Enum.map(payloads, fn text ->
-        # Random delay between 100-500ms
-        delay = :rand.uniform(400) + 100
-        Process.sleep(delay)
+   defp send_payloads(user_id, profile, payloads) do
+     # Map profiles to their target buckets
+     profile_to_bucket = %{
+       "sales" => "finance",
+       "support" => "project",
+       "billing" => "finance",
+       "onboarding" => "project",
+       "technical" => "research"
+     }
 
-        body = %{
-          source: "demo_#{profile}",
-          raw_text: text,
-          hint_tags: [profile],
-          metadata: %{agent: user_id, profile: profile}
-        }
+     target_bucket = profile_to_bucket[profile] || "inbox"
 
-        http_post("#{@base_url}/api/ingest", body, user_id)
-      end)
+     results =
+       Enum.map(payloads, fn text ->
+         # Random delay between 100-500ms
+         delay = :rand.uniform(400) + 100
+         Process.sleep(delay)
 
-    successes = Enum.count(results, fn {:ok, _} -> true; _ -> false end)
-    failures = Enum.count(results, fn {:error, _} -> true; _ -> false end)
+         body = %{
+           source: "demo_#{profile}",
+           raw_text: text,
+           hint_tags: [profile],
+           target_bucket: target_bucket,
+           metadata: %{agent: user_id, profile: profile}
+         }
 
-    {successes, failures}
-  end
+         http_post("#{@base_url}/api/ingest", body, user_id)
+       end)
+
+     successes = Enum.count(results, fn {:ok, _} -> true; _ -> false end)
+     failures = Enum.count(results, fn {:error, _} -> true; _ -> false end)
+
+     {successes, failures}
+   end
 
   defp http_get(url) do
     case :httpc.request(:get, {url, []}, [], []) do

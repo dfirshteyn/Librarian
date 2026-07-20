@@ -32,12 +32,23 @@ defmodule Librarian.Router do
 
   @doc """
   Ingest-time namespacing only. Returns `{bucket, hint_tags}` where bucket
-  is always `"user_id:inbox"` — HOT is a buffer, classification is deferred
-  to the curator at flush time.
+  is either `"user_id:target_bucket"` (if explicitly specified) or
+  `"user_id:inbox"` (default staging buffer). Classification to the
+  semantic bucket is deferred to the curator at flush time, unless
+  target_bucket is pre-assigned.
   """
   def route(%Librarian.Capture.Payload{} = payload, user_id \\ "local") do
     hints = Enum.map(payload.hint_tags, &String.downcase/1)
-    {"#{user_id}:inbox", hints}
+
+    bucket =
+      if payload.target_bucket do
+        normalized = normalize_bucket(payload.target_bucket, user_id)
+        "#{user_id}:#{normalized}"
+      else
+        "#{user_id}:inbox"
+      end
+
+    {bucket, hints}
   end
 
   @doc """
