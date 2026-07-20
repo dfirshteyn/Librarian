@@ -150,9 +150,9 @@ defmodule Librarian.ConsolidatorTest do
 
       {:ok, survivors} = Consolidator.consolidate("test_cons")
 
-      # Should have received :spawned and :complete
+      # Should have received :spawned and :complete (3-tuple: count + merged_count)
       assert_received {:spawned, 2}
-      assert_received {:complete, _final_count}
+      assert_received {:complete, _final_count, _merged_count}
 
       # Should have at least 1 survivor (merged or not)
       assert length(survivors) >= 1

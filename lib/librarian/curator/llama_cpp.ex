@@ -350,10 +350,15 @@ defmodule Librarian.Curator.LlamaCpp do
   defp to_float(v) when is_integer(v), do: v / 1
   defp to_float(_), do: 0.5
 
-  # When the model returns "inbox" (fallback) or an empty bucket, use
-  # keyword-based classification as a safety net. The model's bucket is
-  # trusted when valid; this only catches failures.
-  defp fallback_bucket("inbox", text), do: Librarian.Router.classify_bucket(text)
+  # Only fall back to keyword classification when the model returned nothing
+  # usable (empty string). An explicit "inbox" from the model is a deliberate
+  # decision — the prompt lists "inbox" as a valid bucket and the model chose
+  # it because nothing else fit. Overriding that with keyword classification
+  # almost always produces a false match ("project" catches nearly every
+  # technical word) and sends the memory to the wrong bucket.
+  #
+  # Note: normalize_bucket/2 in parse_result always returns a binary (its
+  # catch-all returns "inbox"), so nil can never arrive here.
   defp fallback_bucket("", text), do: Librarian.Router.classify_bucket(text)
   defp fallback_bucket(bucket, _text) when is_binary(bucket), do: bucket
 
