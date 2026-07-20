@@ -61,6 +61,28 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
 
         <div class="w-px h-6 bg-gray-800 mx-1"></div>
 
+        <a href={export_href(@active_bucket)} download
+          class="text-xs bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-100 border border-emerald-700/70 px-3 py-1.5 rounded-lg font-bold transition-all duration-200 active:scale-95">
+          ⬇️ Export <%= if @active_bucket == "all", do: "All JSON", else: @active_bucket %>
+        </a>
+
+        <a :if={@active_bucket == "all"} href="/api/export?format=db" download
+          class="text-xs bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-100 border border-cyan-800/70 px-3 py-1.5 rounded-lg font-bold transition-all duration-200 active:scale-95">
+          💾 DB
+        </a>
+
+        <button type="button"
+          data-delete-url={delete_href(@active_bucket)}
+          data-delete-label={if @active_bucket == "all", do: "all buckets", else: @active_bucket}
+          onclick="var url=this.dataset.deleteUrl; var label=this.dataset.deleteLabel; if(!url){return;} if(confirm('Delete ' + label + '? Warm memories are archived to COLD and HOT buffers are discarded.')){fetch(url,{method:'DELETE'}).then(function(){window.location.reload();});}"
+          disabled={@active_bucket == "inbox"}
+          class={"text-xs px-3 py-1.5 rounded-lg font-bold transition-all duration-200 border active:scale-95 " <>
+            if(@active_bucket == "inbox",
+              do: "bg-gray-900/80 text-gray-600 border-gray-800 cursor-not-allowed",
+              else: "bg-red-950/60 hover:bg-red-900/80 text-red-100 border-red-800/70 cursor-pointer")}>
+          🗑️ Delete <%= if @active_bucket == "all", do: "all buckets", else: @active_bucket %>
+        </button>
+
         <!-- Force Synaptic Integration Button -->
         <button phx-click="nightly_pass"
           class="text-xs bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-3 py-1.5 rounded-lg font-bold transition-all duration-200 active:scale-95 shadow-md shadow-purple-950/50 cursor-pointer">
@@ -70,6 +92,13 @@ defmodule LibrarianWeb.Dashboard.Components.ControlStrip do
     </div>
     """
   end
+
+  defp export_href("all"), do: "/api/export"
+  defp export_href(bucket), do: "/api/export?bucket=#{URI.encode_www_form(bucket)}"
+
+  defp delete_href("all"), do: "/api/buckets"
+  defp delete_href("inbox"), do: nil
+  defp delete_href(bucket), do: "/api/buckets/#{URI.encode_www_form(bucket)}"
 
   defp total_hot(hot_counts) do
     hot_counts |> Map.values() |> Enum.reduce(0, &(&1 + &2))

@@ -258,29 +258,42 @@ defmodule LibrarianWeb.ApiController do
   Downloads a JSON backup of all memories for the requesting user.
   Used by the "Export/Download Memory Backup" button on the dashboard.
   """
-  def export(conn, _params) do
+  def export(conn, params) do
     user_id = get_user_id(conn)
+    bucket = export_bucket(params["bucket"])
 
     with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
       path = Librarian.ColdStore.ConnectionManager.db_path(user_id)
 
       if File.exists?(path) do
-        memories = export_memories(user_id)
+        if params["format"] == "db" and is_nil(bucket) do
+          conn
+          |> put_resp_content_type("application/vnd.sqlite3")
+          |> put_resp_header(
+            "content-disposition",
+            "attachment; filename=" <> user_id <> "_librarian.db"
+          )
+          |> send_file(200, path)
+        else
+          memories = export_memories(user_id, bucket)
+          bucket_label = bucket || "all"
 
-        conn
-        |> put_resp_content_type("application/json")
-        |> put_resp_header(
-          "content-disposition",
-          "attachment; filename=\"#{user_id}_memories.json\""
-        )
-        |> send_resp(
-          200,
-          Librarian.Json.encode!(%{
-            user_id: user_id,
-            exported_at: DateTime.to_iso8601(DateTime.utc_now()),
-            memories: memories
-          })
-        )
+          conn
+          |> put_resp_content_type("application/json")
+          |> put_resp_header(
+            "content-disposition",
+            "attachment; filename=" <> user_id <> "_" <> bucket_label <> "_memories.json"
+          )
+          |> send_resp(
+            200,
+            Librarian.Json.encode!(%{
+              user_id: user_id,
+              bucket: bucket_label,
+              exported_at: DateTime.to_iso8601(DateTime.utc_now()),
+              memories: memories
+            })
+          )
+        end
       else
         conn
         |> put_status(404)
@@ -300,8 +313,16 @@ defmodule LibrarianWeb.ApiController do
     conn.assigns[:sandbox_id] || "local"
   end
 
-  defp export_memories(user_id) do
-    warm = Librarian.WarmStore.all_for_user(user_id) |> Enum.map(&serialize_memory/1)
+  defp export_bucket(nil), do: nil
+  defp export_bucket(""), do: nil
+  defp export_bucket("all"), do: nil
+  defp export_bucket(bucket) when is_binary(bucket), do: String.trim(bucket)
+
+  defp export_memories(user_id, bucket) do
+    warm =
+      Librarian.WarmStore.all_for_user(user_id)
+      |> Enum.filter(&bucket_matches?(&1.bucket, user_id, bucket))
+      |> Enum.map(&serialize_memory/1)
 
     cold =
       try do
@@ -315,6 +336,9 @@ defmodule LibrarianWeb.ApiController do
           )
 
         result.rows
+        |> Enum.filter(fn [_id, row_bucket | _] ->
+          bucket_matches?(row_bucket, user_id, bucket)
+        end)
         |> Enum.map(fn [
                          id,
                          bucket,
@@ -353,6 +377,13 @@ defmodule LibrarianWeb.ApiController do
       end
 
     %{warm: warm, cold: cold}
+  end
+
+  defp bucket_matches?(_memory_bucket, _user_id, nil), do: true
+
+  defp bucket_matches?(memory_bucket, user_id, bucket) do
+    memory_bucket in [bucket, "#{user_id}:#{bucket}"] or
+      String.ends_with?(memory_bucket, ":#{bucket}")
   end
 
   defp serialize_memory(m) do
@@ -492,6 +523,26 @@ defmodule LibrarianWeb.ApiController do
     conn
     |> put_status(422)
     |> json(%{ok: false, error: "missing name or new_name", user_id: user_id})
+  end
+
+  @doc """
+  DELETE /api/buckets
+  Optional header: X-User-Id (defaults to "local")
+
+  Soft-deletes every non-system bucket for the requesting user.
+  """
+  def delete_all_buckets(conn, _params) do
+    user_id = get_user_id(conn)
+
+    with {:ok, _remaining} <- Librarian.Auth.Manifest.record_request(user_id) do
+      summary = Librarian.delete_all_buckets(user_id)
+      json(conn, %{ok: summary.failed == [], user_id: user_id, summary: summary})
+    else
+      {:error, :budget_exhausted} ->
+        conn
+        |> put_status(429)
+        |> json(%{ok: false, error: "daily request budget exhausted", sandbox_id: user_id})
+    end
   end
 
   @doc """

@@ -61,6 +61,7 @@ defmodule LibrarianWeb.Router do
     get("/buckets", ApiController, :list_buckets)
     post("/buckets", ApiController, :create_bucket)
     put("/buckets/:name", ApiController, :rename_bucket)
+    delete("/buckets", ApiController, :delete_all_buckets)
     delete("/buckets/:name", ApiController, :delete_bucket)
 
     # Public graph network

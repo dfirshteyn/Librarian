@@ -212,4 +212,23 @@ defmodule Librarian do
       {:ok, archived}
     end
   end
+
+  @doc "Delete every non-system bucket for a user. Returns a summary map."
+  def delete_all_buckets(user_id \\ @default_user) do
+    user_id
+    |> list_buckets()
+    |> Enum.reject(&(&1.name == "inbox"))
+    |> Enum.reduce(%{deleted: [], failed: []}, fn bucket, acc ->
+      case delete_bucket(bucket.name, user_id) do
+        {:ok, archived_count} ->
+          update_in(acc.deleted, &[%{bucket: bucket.name, archived: archived_count} | &1])
+
+        {:error, reason} ->
+          update_in(acc.failed, &[%{bucket: bucket.name, reason: reason} | &1])
+      end
+    end)
+    |> then(fn summary ->
+      %{summary | deleted: Enum.reverse(summary.deleted), failed: Enum.reverse(summary.failed)}
+    end)
+  end
 end
