@@ -356,7 +356,7 @@ defmodule Librarian.Flusher do
     Enum.each(actions[:re_scores] || [], fn %{"id" => id, "importance" => imp} ->
       case Librarian.WarmStore.get(id) do
         nil -> :ok
-        memory -> :ets.insert(Librarian.WarmStore, {id, %{memory | importance: imp}})
+        memory -> Librarian.WarmStore.update(id, %{memory | importance: imp})
       end
     end)
 
@@ -373,8 +373,8 @@ defmodule Librarian.Flusher do
       user_id = extract_user_id_from_memory_id(conn["id_a"])
 
       Librarian.ColdStore.log_relationship(
-        conn["id_a"],
-        conn["id_b"],
+        to_string(conn["id_a"]),
+        to_string(conn["id_b"]),
         "cross_connected",
         user_id,
         %{note: conn["note"]}
@@ -384,12 +384,11 @@ defmodule Librarian.Flusher do
     # Apply new tags
     Enum.each(actions[:new_tags] || [], fn %{"id" => id, "tags" => tags} ->
       case Librarian.WarmStore.get(id) do
-        nil ->
-          :ok
+        nil -> :ok
 
         memory ->
           updated = %{memory | tags: Enum.uniq((memory.tags || []) ++ (tags || []))}
-          :ets.insert(Librarian.WarmStore, {id, updated})
+          Librarian.WarmStore.update(id, updated)
       end
     end)
   end

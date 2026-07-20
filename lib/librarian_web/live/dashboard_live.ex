@@ -437,7 +437,7 @@ defmodule LibrarianWeb.DashboardLive do
       )
 
       Flusher.nightly_pass()
-      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, :all})
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, "all", socket.assigns.tenant_id})
     end)
 
     {:noreply, put_flash(socket, :info, "Nightly pass started (async)")}
@@ -456,7 +456,7 @@ defmodule LibrarianWeb.DashboardLive do
         bucket_filter: if(ab == "all", do: nil, else: ab)
       )
 
-      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, tid})
+      Phoenix.PubSub.broadcast(Librarian.PubSub, "flush", {:flushed, ab, tid})
     end)
 
     {:noreply,
